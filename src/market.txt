@@ -1,0 +1,1690 @@
+// src/components/MarketSection.tsx
+import React, { useState, useEffect, useCallback } from 'react';
+import axios from 'axios';
+import {
+  Search,
+  TrendingUp,
+  TrendingDown,
+  LineChart,
+  Brain,
+  Sparkles,
+  Target,
+  Lightbulb,
+  RefreshCw,
+  Lock,
+  BarChart3,
+  Layers,
+  TrendingUp as TrendingUpIcon,
+  TrendingDown as TrendingDownIcon,
+  AlertCircle,
+  Activity,
+  Shield,
+  Target as TargetIcon,
+  Zap,
+  Gauge,
+  Scale,
+  ArrowUpRight,
+  ArrowDownRight,
+  Minus,
+  ChevronUp,
+  ChevronDown,
+  DollarSign,
+  AlertTriangle,
+  Activity as ActivityIcon,
+  Target as Crosshair,
+  Shield as ShieldCheck,
+  TrendingUp as ArrowTrendingUp,
+  TrendingDown as ArrowTrendingDown,
+} from 'lucide-react';
+import { SubscriptionModal } from './SubscriptionModal';
+
+interface MarketData {
+  symbol: string;
+  price: number;
+  change: number;
+  volume: number;
+  category: 'crypto' | 'forex' | 'stocks';
+  description?: string;
+  timestamp: number;
+}
+
+interface CurrencyRate {
+  symbol: string;
+  rate: number;
+  timeframe: string;
+  timestamp: number;
+}
+
+interface MarketSentiment {
+  bullish: number;
+  bearish: number;
+  neutral: number;
+}
+
+interface MarketPsychology {
+  fear: number;
+  greed: number;
+  momentum: number;
+  volatility: number;
+}
+
+interface SupportResistanceLevel {
+  price: number;
+  strength: number;
+  description: string;
+  type: string;
+}
+
+interface SupportResistance {
+  supports: SupportResistanceLevel[];
+  resistances: SupportResistanceLevel[];
+  currentLevel: 'support' | 'resistance' | 'neutral';
+  breakoutDirection: 'up' | 'down' | 'sideways';
+  breakoutProbability: number;
+  recommendedAction: 'buy' | 'sell' | 'hold' | 'wait';
+  confidence: number;
+  pivotPoint: number;
+  recentHigh: number;
+  recentLow: number;
+}
+
+// NEW: Updated Market Overview Interface
+interface MarketOverview {
+  symbol: string;
+  currentPrice: number;
+  priceChange24h: number;
+  
+  // Essential Trading Information
+  tradeSetup: {
+    signal: 'BUY' | 'SELL' | 'BUY_BREAKOUT' | 'RANGE_BOUND' | 'HOLD';
+    confidence: number;
+    entryZones: number[];
+    stopLoss: number;
+    takeProfit: number;
+    positionSize: string;
+    rewardRiskRatio: number;
+  };
+  
+  keyLevels: {
+    immediateSupport: number;
+    immediateResistance: number;
+    nextMajorSupport: number;
+    nextMajorResistance: number;
+    breakoutLevel: number;
+  };
+  
+  momentum: {
+    direction: 'bullish' | 'bearish' | 'neutral';
+    strength: number;
+    acceleration: 'increasing' | 'decreasing' | 'stable' | 'volatile' | 'unstable_increase';
+    rsi: number;
+  };
+  
+  riskMetrics: {
+    volatility: 'low' | 'medium' | 'high';
+    atr: number;
+    maxRiskPerTrade: string;
+    rewardRiskRatio: number;
+  };
+  
+  volume: {
+    status: 'normal' | 'accumulation' | 'strong_accumulation' | 'distribution';
+    relativeVolume: number;
+    volumeSpike: boolean;
+  };
+  
+  marketStructure: {
+    trend: 'uptrend' | 'downtrend' | 'sideways';
+    phase: 'bullish_momentum' | 'bearish_momentum' | 'consolidation' | 'volatile' | 'neutral';
+    bias: 'bullish' | 'bearish' | 'neutral';
+  };
+  
+  priceAction: {
+    pattern: string;
+    candles: 'bullish' | 'bearish' | 'neutral';
+    rejection: boolean;
+  };
+  
+  timeframeAlignment: string;
+  summary: string;
+  timestamp: number;
+}
+
+interface User {
+  id: string;
+  name: string;
+  email: string;
+  avatar: string;
+  subscription?: {
+    plan: string;
+    active: boolean;
+    startDate?: string;
+    expiryDate?: string;
+    subscriptionId?: string;
+  };
+}
+
+interface MarketSectionProps {
+  user: User;
+  onUserUpdate: (user: User) => void;
+}
+
+const API_BASE_URL = import.meta.env.VITE_API_URL;
+const TIMEFRAMES =  ['15m', '30m', '1h', '3h', '6h', '12h', '24h'] as const;
+type Timeframe = typeof TIMEFRAMES[number];
+
+// Define available currencies and access rules for each plan
+const PLAN_CURRENCIES = {
+  Free: ['BTC/USDT', 'ETH/USDT', 'XRP/USDT', 'LTC/USDT', 'DOGE/USDT'],
+  Enterprise: 'all'
+};
+
+const FREE_TIER_ACCESS = {
+  timeframes: ['12h', '24h'],
+  endpoints: ['rate', 'sentiment', 'psychology', 'overview', 'support-resistance']
+};
+
+const PsychologyIndicator: React.FC<{
+  label: string;
+  value: number;
+  icon?: React.ReactNode;
+  color: 'blue' | 'red' | 'green' | 'yellow' | 'purple' | 'indigo';
+}> = ({ label, value, icon, color }) => {
+  const colorClasses = {
+    blue: 'bg-blue-600',
+    red: 'bg-red-600',
+    green: 'bg-green-600',
+    yellow: 'bg-yellow-600',
+    purple: 'bg-purple-600',
+    indigo: 'bg-indigo-600'
+  };
+
+  return (
+    <div className="flex flex-col items-start w-full mb-6">
+      <div className="flex items-center gap-2 text-sm text-gray-700 mb-2">
+        {icon}
+        <span className="font-medium">{label}</span>
+      </div>
+      <div className="w-full bg-gray-100 rounded-full h-2.5 mb-2">
+        <div
+          className={`h-2.5 rounded-full transition-all duration-500 ${colorClasses[color]}`}
+          style={{ width: `${Math.min(value || 0, 100)}%` }}
+        />
+      </div>
+      <div className="flex justify-between w-full text-sm">
+        <span className="text-gray-500">0%</span>
+        <span className="font-semibold text-gray-900">{(value || 0).toFixed(0)}%</span>
+        <span className="text-gray-500">100%</span>
+      </div>
+    </div>
+  );
+};
+
+const SupportResistanceCard: React.FC<{
+  srData: SupportResistance | null;
+  currentPrice?: number;
+  selectedAsset?: MarketData | null;
+}> = ({ srData, currentPrice, selectedAsset }) => {
+  // Return loading state if srData is null
+  if (!srData) {
+    return (
+      <div className="space-y-6">
+        <div className="text-center py-8 text-gray-500">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p>Loading support/resistance data...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Function to format price with appropriate decimal places
+  const formatPrice = (price: number) => {
+    if (price === 0 || !price) return '0.0000';
+    
+    // Determine appropriate decimal places based on price magnitude
+    if (price < 0.0001) {
+      return price.toFixed(8);
+    } else if (price < 0.001) {
+      return price.toFixed(7);
+    } else if (price < 0.01) {
+      return price.toFixed(6);
+    } else if (price < 0.1) {
+      return price.toFixed(5);
+    } else if (price < 1) {
+      return price.toFixed(4);
+    } else if (price < 10) {
+      return price.toFixed(3);
+    } else if (price < 100) {
+      return price.toFixed(2);
+    } else if (price < 1000) {
+      return price.toFixed(1);
+    } else {
+      return price.toFixed(0);
+    }
+  };
+
+  const getActionColor = (action: string) => {
+    switch (action) {
+      case 'buy': return 'bg-green-100 text-green-800';
+      case 'sell': return 'bg-red-100 text-red-800';
+      case 'hold': return 'bg-yellow-100 text-yellow-800';
+      default: return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  const getDirectionIcon = (direction: string) => {
+    switch (direction) {
+      case 'up': return <ArrowUpRight className="text-green-600" size={20} />;
+      case 'down': return <ArrowDownRight className="text-red-600" size={20} />;
+      default: return <Minus className="text-gray-600" size={20} />;
+    }
+  };
+
+  // Calculate distance from current price for each level
+  const calculateDistance = (levelPrice: number) => {
+    if (!currentPrice || currentPrice === 0) return 'N/A';
+    const distance = ((levelPrice - currentPrice) / currentPrice) * 100;
+    return `${distance >= 0 ? '+' : ''}${distance.toFixed(2)}%`;
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Current Price Display */}
+      {currentPrice && (
+        <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-4 border border-blue-100">
+          <div className="flex items-center gap-2 mb-2">
+            <DollarSign size={18} className="text-blue-600" />
+            <span className="text-sm font-medium text-gray-700">Current Price</span>
+          </div>
+          <div className="text-2xl font-bold text-gray-900">
+            ${formatPrice(currentPrice)}
+          </div>
+          <div className="text-xs text-gray-500 mt-1">
+            {selectedAsset?.symbol || 'Asset'}
+          </div>
+        </div>
+      )}
+
+      {/* Current Level & Recommendation */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-4 border border-blue-100">
+          <div className="flex items-center gap-2 mb-2">
+            <Scale size={18} className="text-blue-600" />
+            <span className="text-sm font-medium text-gray-700">Current Level</span>
+          </div>
+          <div className={`inline-block px-3 py-1 rounded-full text-sm font-medium mb-2 ${
+            srData.currentLevel === 'support'
+              ? 'bg-green-100 text-green-800'
+              : srData.currentLevel === 'resistance'
+              ? 'bg-red-100 text-red-800'
+              : 'bg-gray-100 text-gray-800'
+          }`}>
+            {srData.currentLevel?.toUpperCase() || 'NEUTRAL'}
+          </div>
+          <p className="text-xs text-gray-600">Price is near {srData.currentLevel || 'neutral'} level</p>
+        </div>
+
+        <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl p-4 border border-green-100">
+          <div className="flex items-center gap-2 mb-2">
+            <Target size={18} className="text-green-600" />
+            <span className="text-sm font-medium text-gray-700">Recommendation</span>
+          </div>
+          <div className={`inline-block px-3 py-1 rounded-full text-sm font-medium mb-2 ${getActionColor(srData.recommendedAction)}`}>
+            {srData.recommendedAction?.toUpperCase() || 'WAIT'}
+          </div>
+          <p className="text-xs text-gray-600">{srData.confidence || 0}% confidence</p>
+        </div>
+      </div>
+
+      {/* Breakout Analysis */}
+      <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-xl p-4 border border-purple-100">
+        <div className="flex items-center gap-2 mb-3">
+          <Zap size={18} className="text-purple-600" />
+          <span className="text-sm font-medium text-gray-700">Breakout Analysis</span>
+        </div>
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            {getDirectionIcon(srData.breakoutDirection || 'sideways')}
+            <span className="text-sm font-medium text-gray-900">
+              {srData.breakoutDirection === 'up' ? 'Bullish' : srData.breakoutDirection === 'down' ? 'Bearish' : 'Sideways'} Breakout
+            </span>
+          </div>
+          <div className="text-sm font-bold text-gray-900">
+            {srData.breakoutProbability || 0}%
+          </div>
+        </div>
+        <div className="w-full bg-gray-200 rounded-full h-2">
+          <div
+            className={`h-2 rounded-full transition-all duration-500 ${
+              srData.breakoutDirection === 'up'
+                ? 'bg-green-500'
+                : srData.breakoutDirection === 'down'
+                ? 'bg-red-500'
+                : 'bg-gray-500'
+            }`}
+            style={{ width: `${Math.min(srData.breakoutProbability || 0, 100)}%` }}
+          />
+        </div>
+      </div>
+
+      {/* Support Levels */}
+      <div className="space-y-3">
+        <h4 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+          <TrendingDownIcon size={16} className="text-green-600" />
+          Key Support Levels
+        </h4>
+        {srData.supports && srData.supports.length > 0 ? (
+          srData.supports.slice(0, 3).map((support, index) => (
+            <div key={index} className="flex items-center justify-between p-3 bg-green-50 rounded-lg border border-green-100">
+              <div className="flex-1">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="font-medium text-gray-900">${formatPrice(support.price || 0)}</span>
+                  {currentPrice && (
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${
+                      support.price > currentPrice 
+                        ? 'bg-red-100 text-red-800'
+                        : 'bg-green-100 text-green-800'
+                    }`}>
+                      {calculateDistance(support.price)}
+                      {support.price > currentPrice ? <ChevronUp size={12} className="inline ml-1" /> : <ChevronDown size={12} className="inline ml-1" />}
+                    </span>
+                  )}
+                </div>
+                <div className="text-xs text-gray-600">{support.description || 'Support level'}</div>
+              </div>
+              <div className="text-right">
+                <div className="font-bold text-green-700">{support.strength || 0}/100</div>
+                <div className="text-xs text-gray-500">Strength</div>
+              </div>
+            </div>
+          ))
+        ) : (
+          <div className="p-3 bg-gray-50 rounded-lg text-center text-gray-500 text-sm">
+            No support levels available
+          </div>
+        )}
+      </div>
+
+      {/* Resistance Levels */}
+      <div className="space-y-3">
+        <h4 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+          <TrendingUpIcon size={16} className="text-red-600" />
+          Key Resistance Levels
+        </h4>
+        {srData.resistances && srData.resistances.length > 0 ? (
+          srData.resistances.slice(0, 3).map((resistance, index) => (
+            <div key={index} className="flex items-center justify-between p-3 bg-red-50 rounded-lg border border-red-100">
+              <div className="flex-1">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="font-medium text-gray-900">${formatPrice(resistance.price || 0)}</span>
+                  {currentPrice && (
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${
+                      resistance.price > currentPrice 
+                        ? 'bg-red-100 text-red-800'
+                        : 'bg-green-100 text-green-800'
+                    }`}>
+                      {calculateDistance(resistance.price)}
+                      {resistance.price > currentPrice ? <ChevronUp size={12} className="inline ml-1" /> : <ChevronDown size={12} className="inline ml-1" />}
+                    </span>
+                  )}
+                </div>
+                <div className="text-xs text-gray-600">{resistance.description || 'Resistance level'}</div>
+              </div>
+              <div className="text-right">
+                <div className="font-bold text-red-700">{resistance.strength || 0}/100</div>
+                <div className="text-xs text-gray-500">Strength</div>
+              </div>
+            </div>
+          ))
+        ) : (
+          <div className="p-3 bg-gray-50 rounded-lg text-center text-gray-500 text-sm">
+            No resistance levels available
+          </div>
+        )}
+      </div>
+
+      {/* Additional Metrics */}
+      {srData.pivotPoint > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-4 border-t border-gray-100">
+          <div className="bg-gray-50 rounded-lg p-3 text-center">
+            <div className="text-xs text-gray-600">Pivot Point</div>
+            <div className="font-semibold text-gray-900">${formatPrice(srData.pivotPoint)}</div>
+          </div>
+          <div className="bg-gray-50 rounded-lg p-3 text-center">
+            <div className="text-xs text-gray-600">Recent High</div>
+            <div className="font-semibold text-gray-900">${formatPrice(srData.recentHigh)}</div>
+          </div>
+          <div className="bg-gray-50 rounded-lg p-3 text-center">
+            <div className="text-xs text-gray-600">Recent Low</div>
+            <div className="font-semibold text-gray-900">${formatPrice(srData.recentLow)}</div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const MarketCard: React.FC<{
+  market: MarketData;
+  onClick: () => void;
+}> = ({ market, onClick }) => {
+  return (
+    <div
+      className="flex items-center justify-between p-6 rounded-xl transition-all cursor-pointer group border border-gray-100 hover:border-blue-200 hover:shadow-md hover:bg-gray-50"
+      onClick={onClick}
+    >
+      <div className="flex-1">
+        <div className="font-semibold text-lg text-gray-900 mb-1 flex items-center gap-2">
+          <span>{market?.symbol || 'N/A'}</span>
+        </div>
+        <div className="text-sm text-gray-500 mb-2">
+          {(market?.category?.toUpperCase() || 'N/A')} • Vol: {(market?.volume?.toLocaleString() || '0')}
+        </div>
+      </div>
+      <div className="text-right">
+        <div
+          className={`text-base flex items-center justify-end font-medium ${
+            market?.change >= 0 ? 'text-green-500' : 'text-red-500'
+          }`}
+        >
+          {market?.change >= 0 ? <TrendingUp size={18} /> : <TrendingDown size={18} />}
+          <span className="ml-1">
+            {(market?.change ? Math.abs(market.change).toFixed(2) : '0.00')}%
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// NEW: Trader Overview Component
+const TraderOverview: React.FC<{
+  overview: MarketOverview | null;
+  loading: boolean;
+}> = ({ overview, loading }) => {
+  const formatPrice = (price: number) => {
+    if (price === 0 || !price) return '0.0000';
+    
+    if (price < 0.0001) return price.toFixed(8);
+    else if (price < 0.001) return price.toFixed(7);
+    else if (price < 0.01) return price.toFixed(6);
+    else if (price < 0.1) return price.toFixed(5);
+    else if (price < 1) return price.toFixed(4);
+    else if (price < 10) return price.toFixed(3);
+    else if (price < 100) return price.toFixed(2);
+    else if (price < 1000) return price.toFixed(1);
+    else return price.toFixed(0);
+  };
+
+  const getSignalColor = (signal: string) => {
+    switch (signal) {
+      case 'BUY':
+      case 'BUY_BREAKOUT':
+        return 'bg-gradient-to-r from-green-500 to-emerald-600';
+      case 'SELL':
+        return 'bg-gradient-to-r from-red-500 to-rose-600';
+      case 'RANGE_BOUND':
+        return 'bg-gradient-to-r from-yellow-500 to-amber-600';
+      default:
+        return 'bg-gradient-to-r from-gray-500 to-gray-600';
+    }
+  };
+
+  const getRiskColor = (level: string) => {
+    switch (level) {
+      case 'low': return 'bg-green-100 text-green-800';
+      case 'medium': return 'bg-yellow-100 text-yellow-800';
+      case 'high': return 'bg-red-100 text-red-800';
+      default: return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  const getVolumeColor = (status: string) => {
+    switch (status) {
+      case 'accumulation':
+      case 'strong_accumulation':
+        return 'text-green-600 bg-green-100';
+      case 'distribution':
+        return 'text-red-600 bg-red-100';
+      default:
+        return 'text-gray-600 bg-gray-100';
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="space-y-8">
+        <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl p-8 border border-blue-100 shadow-lg">
+          <div className="text-center py-12">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <h3 className="text-xl font-semibold text-gray-900 mb-2">Loading Trader Overview</h3>
+            <p className="text-gray-600">Preparing actionable trading insights...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!overview) {
+    return (
+      <div className="space-y-8">
+        <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl p-8 border border-blue-100 shadow-lg">
+          <div className="text-center py-12">
+            <AlertTriangle size={48} className="text-yellow-500 mx-auto mb-4" />
+            <h3 className="text-xl font-semibold text-gray-900 mb-2">No Overview Data</h3>
+            <p className="text-gray-600">Market overview data is not available for this asset.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-8">
+      {/* Header with Signal */}
+      <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl p-8 border border-blue-100 shadow-lg">
+        <div className="flex flex-col lg:flex-row lg:items-center gap-6 mb-8">
+          <div className="flex-1">
+            <div className="flex items-center gap-4 mb-4">
+              <div className={`px-6 py-3 rounded-xl text-white font-bold text-lg ${getSignalColor(overview.tradeSetup.signal)}`}>
+                {overview.tradeSetup.signal.replace('_', ' ')}
+              </div>
+              <div className="bg-white px-4 py-2 rounded-lg border border-gray-200">
+                <div className="text-sm text-gray-600">Confidence</div>
+                <div className="text-xl font-bold text-gray-900">{overview.tradeSetup.confidence}%</div>
+              </div>
+            </div>
+            <p className="text-gray-600">Signal based on multi-timeframe analysis and market structure</p>
+          </div>
+          <div className="bg-white rounded-xl p-6 border border-gray-200">
+            <div className="text-center">
+              <div className="text-2xl font-bold text-gray-900 mb-2">
+                ${formatPrice(overview.currentPrice)}
+              </div>
+              <div className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-medium ${
+                overview.priceChange24h >= 0 
+                  ? 'bg-green-100 text-green-800' 
+                  : 'bg-red-100 text-red-800'
+              }`}>
+                {overview.priceChange24h >= 0 ? <ArrowTrendingUp size={14} /> : <ArrowTrendingDown size={14} />}
+                {overview.priceChange24h >= 0 ? '+' : ''}{overview.priceChange24h.toFixed(2)}%
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Trade Setup Details */}
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-8">
+          <div className="bg-white rounded-xl p-6 border border-gray-200">
+            <h4 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
+              <Crosshair size={20} className="text-blue-600" />
+              Entry Zones
+            </h4>
+            <div className="space-y-2">
+              {overview.tradeSetup.entryZones.map((zone, index) => (
+                <div key={index} className="text-lg font-bold text-gray-900">
+                  ${formatPrice(zone)}
+                </div>
+              ))}
+            </div>
+            <div className="text-xs text-gray-500 mt-2">Best entry prices</div>
+          </div>
+
+          <div className="bg-white rounded-xl p-6 border border-gray-200">
+            <h4 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
+              <ShieldCheck size={20} className="text-red-600" />
+              Stop Loss
+            </h4>
+            <div className="text-2xl font-bold text-gray-900 mb-2">
+              ${formatPrice(overview.tradeSetup.stopLoss)}
+            </div>
+            <div className="text-xs text-gray-500">Risk management level</div>
+          </div>
+
+          <div className="bg-white rounded-xl p-6 border border-gray-200">
+            <h4 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
+              <TargetIcon size={20} className="text-green-600" />
+              Take Profit
+            </h4>
+            <div className="text-2xl font-bold text-gray-900 mb-2">
+              ${formatPrice(overview.tradeSetup.takeProfit)}
+            </div>
+            <div className="text-xs text-gray-500">Profit target</div>
+          </div>
+
+          <div className="bg-white rounded-xl p-6 border border-gray-200">
+            <h4 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
+              <Scale size={20} className="text-purple-600" />
+              Risk/Reward
+            </h4>
+            <div className="text-2xl font-bold text-gray-900 mb-2">
+              1:{overview.tradeSetup.rewardRiskRatio.toFixed(2)}
+            </div>
+            <div className="text-xs text-gray-500">Position size: {overview.tradeSetup.positionSize}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Key Levels & Market Structure */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {/* Key Levels */}
+        <div className="bg-white rounded-2xl p-8 border border-gray-100 shadow-lg">
+          <h3 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-3">
+            <Target size={24} className="text-blue-600" />
+            Key Levels
+          </h3>
+          <div className="space-y-6">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="bg-green-50 rounded-xl p-4 border border-green-100">
+                <div className="text-sm text-gray-600 mb-1">Immediate Support</div>
+                <div className="text-xl font-bold text-gray-900">
+                  ${formatPrice(overview.keyLevels.immediateSupport)}
+                </div>
+                <div className="text-xs text-gray-500 mt-1">Nearest support level</div>
+              </div>
+              <div className="bg-red-50 rounded-xl p-4 border border-red-100">
+                <div className="text-sm text-gray-600 mb-1">Immediate Resistance</div>
+                <div className="text-xl font-bold text-gray-900">
+                  ${formatPrice(overview.keyLevels.immediateResistance)}
+                </div>
+                <div className="text-xs text-gray-500 mt-1">Nearest resistance level</div>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="bg-green-100 rounded-xl p-4 border border-green-200">
+                <div className="text-sm text-gray-700 mb-1">Major Support</div>
+                <div className="text-lg font-bold text-gray-900">
+                  ${formatPrice(overview.keyLevels.nextMajorSupport)}
+                </div>
+              </div>
+              <div className="bg-red-100 rounded-xl p-4 border border-red-200">
+                <div className="text-sm text-gray-700 mb-1">Major Resistance</div>
+                <div className="text-lg font-bold text-gray-900">
+                  ${formatPrice(overview.keyLevels.nextMajorResistance)}
+                </div>
+              </div>
+            </div>
+            <div className="bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl p-4 border border-blue-200">
+              <div className="text-sm text-gray-600 mb-1">Breakout Level</div>
+              <div className="text-xl font-bold text-gray-900">
+                ${formatPrice(overview.keyLevels.breakoutLevel)}
+              </div>
+              <div className="text-xs text-gray-500 mt-1">Watch for breakout confirmation</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Market Structure & Momentum */}
+        <div className="bg-white rounded-2xl p-8 border border-gray-100 shadow-lg">
+          <h3 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-3">
+            <ActivityIcon size={24} className="text-purple-600" />
+            Market Structure
+          </h3>
+          <div className="space-y-6">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-4 border border-blue-100">
+                <div className="text-sm text-gray-600 mb-1">Trend</div>
+                <div className={`text-lg font-bold ${
+                  overview.marketStructure.trend === 'uptrend' ? 'text-green-600' :
+                  overview.marketStructure.trend === 'downtrend' ? 'text-red-600' :
+                  'text-gray-600'
+                }`}>
+                  {overview.marketStructure.trend.toUpperCase()}
+                </div>
+              </div>
+              <div className="bg-gradient-to-br from-yellow-50 to-orange-50 rounded-xl p-4 border border-yellow-100">
+                <div className="text-sm text-gray-600 mb-1">Phase</div>
+                <div className="text-lg font-bold text-gray-900">
+                  {overview.marketStructure.phase.replace('_', ' ').toUpperCase()}
+                </div>
+              </div>
+            </div>
+            <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl p-4 border border-green-100">
+              <div className="text-sm text-gray-600 mb-1">Bias</div>
+              <div className={`text-lg font-bold ${
+                overview.marketStructure.bias === 'bullish' ? 'text-green-600' :
+                overview.marketStructure.bias === 'bearish' ? 'text-red-600' :
+                'text-gray-600'
+              }`}>
+                {overview.marketStructure.bias.toUpperCase()}
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-xl p-4 border border-purple-100">
+                <div className="text-sm text-gray-600 mb-1">Momentum</div>
+                <div className="text-lg font-bold text-gray-900">{overview.momentum.strength}/100</div>
+                <div className="text-xs text-gray-500 mt-1">{overview.momentum.direction} • {overview.momentum.acceleration}</div>
+              </div>
+              <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl p-4 border border-gray-200">
+                <div className="text-sm text-gray-600 mb-1">RSI</div>
+                <div className={`text-lg font-bold ${
+                  overview.momentum.rsi > 70 ? 'text-red-600' :
+                  overview.momentum.rsi < 30 ? 'text-green-600' :
+                  'text-gray-600'
+                }`}>
+                  {overview.momentum.rsi}
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  {overview.momentum.rsi > 70 ? 'Overbought' : overview.momentum.rsi < 30 ? 'Oversold' : 'Neutral'}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Risk & Volume Analysis */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {/* Risk Metrics */}
+        <div className="bg-white rounded-2xl p-8 border border-gray-100 shadow-lg">
+          <h3 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-3">
+            <Shield size={24} className="text-red-600" />
+            Risk Metrics
+          </h3>
+          <div className="space-y-6">
+            <div className={`inline-block px-4 py-2 rounded-full text-lg font-bold mb-4 ${getRiskColor(overview.riskMetrics.volatility)}`}>
+              {overview.riskMetrics.volatility.toUpperCase()} VOLATILITY
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="bg-gray-50 rounded-xl p-4">
+                <div className="text-sm text-gray-600 mb-1">ATR</div>
+                <div className="text-lg font-bold text-gray-900">{overview.riskMetrics.atr.toFixed(4)}</div>
+                <div className="text-xs text-gray-500 mt-1">Average True Range</div>
+              </div>
+              <div className="bg-gray-50 rounded-xl p-4">
+                <div className="text-sm text-gray-600 mb-1">Max Risk</div>
+                <div className="text-lg font-bold text-gray-900">{overview.riskMetrics.maxRiskPerTrade}</div>
+                <div className="text-xs text-gray-500 mt-1">Per trade</div>
+              </div>
+            </div>
+            <div className="bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl p-4 border border-blue-100">
+              <div className="text-sm text-gray-600 mb-1">Timeframe Alignment</div>
+              <div className="text-lg font-bold text-gray-900">
+                {overview.timeframeAlignment.replace('_', ' ').toUpperCase()}
+              </div>
+              <div className="text-xs text-gray-500 mt-1">Multi-timeframe consistency</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Volume & Price Action */}
+        <div className="bg-white rounded-2xl p-8 border border-gray-100 shadow-lg">
+          <h3 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-3">
+            <BarChart3 size={24} className="text-green-600" />
+            Volume & Price Action
+          </h3>
+          <div className="space-y-6">
+            <div className={`inline-block px-4 py-2 rounded-full text-sm font-medium mb-4 ${getVolumeColor(overview.volume.status)}`}>
+              {overview.volume.status.replace('_', ' ').toUpperCase()} VOLUME
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl p-4 border border-green-100">
+                <div className="text-sm text-gray-600 mb-1">Relative Volume</div>
+                <div className="text-lg font-bold text-gray-900">{overview.volume.relativeVolume.toFixed(2)}x</div>
+                <div className="text-xs text-gray-500 mt-1">vs Average</div>
+              </div>
+              <div className="bg-gradient-to-br from-blue-50 to-cyan-50 rounded-xl p-4 border border-blue-100">
+                <div className="text-sm text-gray-600 mb-1">Volume Spike</div>
+                <div className={`text-lg font-bold ${overview.volume.volumeSpike ? 'text-green-600' : 'text-gray-600'}`}>
+                  {overview.volume.volumeSpike ? 'YES' : 'NO'}
+                </div>
+              </div>
+            </div>
+            <div className="bg-gradient-to-br from-yellow-50 to-amber-50 rounded-xl p-4 border border-yellow-100">
+              <div className="text-sm text-gray-600 mb-1">Price Action Pattern</div>
+              <div className="text-lg font-bold text-gray-900">{overview.priceAction.pattern.replace('_', ' ').toUpperCase()}</div>
+              <div className="text-xs text-gray-500 mt-1">
+                {overview.priceAction.rejection ? 'Rejection candles present' : 'No significant rejection'}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Quick Summary */}
+      <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl p-8 border border-blue-100 shadow-lg">
+        <h3 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-3">
+          <Lightbulb size={24} className="text-yellow-600" />
+          Quick Summary
+        </h3>
+        <div className="bg-white rounded-xl p-6 border border-gray-200">
+          <div className="text-lg text-gray-800 leading-relaxed">
+            {overview.summary}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export const MarketSection: React.FC<MarketSectionProps> = ({ user, onUserUpdate }) => {
+  const [selectedAsset, setSelectedAsset] = useState<MarketData | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [markets, setMarkets] = useState<MarketData[]>([]);
+  const [sentiment, setSentiment] = useState<MarketSentiment | null>(null);
+  const [psychology, setPsychology] = useState<MarketPsychology | null>(null);
+  const [currencyRate, setCurrencyRate] = useState<CurrencyRate | null>(null);
+  const [supportResistance, setSupportResistance] = useState<SupportResistance | null>(null);
+  const [overview, setOverview] = useState<MarketOverview | null>(null);
+  const [selectedTimeframe, setSelectedTimeframe] = useState<Timeframe>('24h');
+  const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
+  const [showOverview, setShowOverview] = useState(false);
+  
+  const [loading, setLoading] = useState({
+    markets: true,
+    sentiment: false,
+    psychology: false,
+    currencyRate: false,
+    supportResistance: false,
+    overview: false,
+  });
+  
+  const [error, setError] = useState<{
+    markets: string | null;
+    assetData: string | null;
+    overview: string | null;
+  }>({ markets: null, assetData: null, overview: null });
+
+  const isPremium = user?.subscription?.active && user.subscription.plan !== 'Free';
+  const isFreeTier = !isPremium;
+
+  const refreshUser = async () => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+
+    try {
+      const res = await axios.get(`${API_BASE_URL}/api/profile`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      onUserUpdate(res.data);
+    } catch (err) {
+      console.error('Failed to refresh user:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (selectedAsset) {
+      fetchAssetData(selectedTimeframe);
+    }
+  }, [user]);
+
+  const fetchMarkets = useCallback(async (timeframe: Timeframe) => {
+    try {
+      setLoading((prev) => ({ ...prev, markets: true }));
+      setError((prev) => ({ ...prev, markets: null }));
+
+      const response = await axios.get(`${API_BASE_URL}/markets`, {
+        params: { timeframe },
+        timeout: 10000,
+      });
+
+      if (Array.isArray(response.data)) {
+        setMarkets(response.data);
+      } else {
+        throw new Error('Invalid markets data format');
+      }
+    } catch (err) {
+      const message = axios.isAxiosError(err)
+        ? err.response?.data?.message || 'Failed to fetch markets'
+        : 'An unexpected error occurred';
+      setError((prev) => ({ ...prev, markets: message }));
+      console.error('Market fetch error:', err);
+    } finally {
+      setLoading((prev) => ({ ...prev, markets: false }));
+    }
+  }, []);
+
+  const fetchAssetData = useCallback(async (timeframe: Timeframe) => {
+    if (!selectedAsset) return;
+
+    try {
+      setLoading({
+        markets: false,
+        sentiment: true,
+        psychology: true,
+        currencyRate: true,
+        supportResistance: true,
+        overview: false,
+      });
+      setError((prev) => ({ ...prev, assetData: null }));
+
+      const token = localStorage.getItem('token');
+      if (!token) {
+        throw new Error('Authentication token missing');
+      }
+
+      const symbol = selectedAsset.symbol?.trim() || '';
+      const [base, quote] = symbol.split('/');
+
+      // Determine which endpoints to fetch based on user tier
+      const endpoints = [
+        { 
+          url: `${API_BASE_URL}/markets/${base}/${quote}/sentiment`,
+          name: 'sentiment',
+          condition: true // Always available for Free tier
+        },
+        { 
+          url: `${API_BASE_URL}/markets/${base}/${quote}/psychology`,
+          name: 'psychology',
+          condition: isPremium
+        },
+        { 
+          url: `${API_BASE_URL}/markets/${base}/${quote}/rate`,
+          name: 'rate',
+          condition: true // Always available for Free tier
+        },
+        { 
+          url: `${API_BASE_URL}/markets/${base}/${quote}/support-resistance`,
+          name: 'support-resistance',
+          condition: true // Available for Free tier
+        },
+      ].filter(ep => ep.condition);
+
+      const responses = await Promise.all(
+        endpoints.map((endpoint) =>
+          axios
+            .get(endpoint.url, {
+              params: { timeframe },
+              headers: { Authorization: `Bearer ${token}` },
+              timeout: 10000,
+            })
+            .then(response => ({ endpoint, data: response.data }))
+            .catch((err) => {
+              console.error(`Failed to fetch ${endpoint.url}:`, err);
+              return { endpoint, error: true, message: axios.isAxiosError(err) ? err.response?.data?.message : 'Request failed' };
+            })
+        )
+      );
+
+      // Process responses
+      responses.forEach((response) => {
+        if ('error' in response) {
+          console.warn(`Failed to fetch ${response.endpoint.name}:`, response.message);
+          return;
+        }
+
+        switch (response.endpoint.name) {
+          case 'sentiment':
+            setSentiment(response.data);
+            break;
+          case 'psychology':
+            setPsychology(response.data);
+            break;
+          case 'rate':
+            setCurrencyRate(response.data);
+            break;
+          case 'support-resistance':
+            setSupportResistance(response.data);
+            break;
+        }
+      });
+
+    } catch (err) {
+      const message = axios.isAxiosError(err)
+        ? err.response?.data?.message || 'Failed to fetch asset data'
+        : 'An unexpected error occurred';
+      setError((prev) => ({ ...prev, assetData: message }));
+      console.error('Asset data fetch error:', err);
+      if (axios.isAxiosError(err) && err.response?.status === 403) {
+        setShowSubscriptionModal(true);
+      }
+    } finally {
+      setLoading({
+        markets: false,
+        sentiment: false,
+        psychology: false,
+        currencyRate: false,
+        supportResistance: false,
+        overview: false,
+      });
+    }
+  }, [selectedAsset, isPremium]);
+
+  const fetchMarketOverview = useCallback(async () => {
+    if (!selectedAsset) return;
+
+    try {
+      setLoading(prev => ({ ...prev, overview: true }));
+      setError(prev => ({ ...prev, overview: null }));
+
+      const token = localStorage.getItem('token');
+      if (!token) {
+        throw new Error('Authentication token missing');
+      }
+
+      const symbol = selectedAsset.symbol?.trim() || '';
+      const [base, quote] = symbol.split('/');
+
+      const response = await axios.get(
+        `${API_BASE_URL}/markets/${base}/${quote}/overview`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          timeout: 15000,
+        }
+      );
+
+      setOverview(response.data);
+      setShowOverview(true);
+    } catch (err) {
+      const message = axios.isAxiosError(err)
+        ? err.response?.data?.error || 'Failed to fetch market overview'
+        : 'An unexpected error occurred';
+      setError(prev => ({ ...prev, overview: message }));
+      console.error('Market overview fetch error:', err);
+      if (axios.isAxiosError(err) && err.response?.status === 403) {
+        setShowSubscriptionModal(true);
+      }
+    } finally {
+      setLoading(prev => ({ ...prev, overview: false }));
+    }
+  }, [selectedAsset]);
+
+  useEffect(() => {
+    fetchMarkets(selectedTimeframe);
+  }, [fetchMarkets, selectedTimeframe]);
+
+  useEffect(() => {
+    if (selectedAsset && hasAccessToCurrency(selectedAsset.symbol) && !showOverview) {
+      fetchAssetData(selectedTimeframe);
+    } else {
+      setCurrencyRate(null);
+      setSentiment(null);
+      setPsychology(null);
+      setSupportResistance(null);
+    }
+  }, [fetchAssetData, selectedAsset, selectedTimeframe, showOverview]);
+
+  const handleUpgradeClick = () => {
+    setShowSubscriptionModal(true);
+  };
+
+  const hasAccessToTimeframe = (tf: Timeframe): boolean =>
+    isFreeTier ? FREE_TIER_ACCESS.timeframes.includes(tf) : true;
+
+  const hasAccessToCurrency = (symbol: string): boolean =>
+    isFreeTier
+      ? PLAN_CURRENCIES.Free.includes(symbol)
+      : true;
+
+  const filteredMarkets = markets.filter((market) =>
+    market?.symbol?.toLowerCase()?.includes(searchTerm.toLowerCase()) || false
+  );
+
+  const renderOverviewButton = () => {
+    if (!selectedAsset || !hasAccessToCurrency(selectedAsset.symbol)) return null;
+
+    return (
+      <div className="flex items-center gap-4">
+        <button
+          onClick={() => {
+            if (showOverview) {
+              setShowOverview(false);
+            } else {
+              fetchMarketOverview();
+            }
+          }}
+          className="flex items-center gap-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-6 py-3 rounded-lg hover:from-indigo-700 hover:to-purple-700 transition-all shadow-lg hover:shadow-xl text-base font-medium disabled:opacity-50"
+          disabled={loading.overview}
+        >
+          {loading.overview ? (
+            <>
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+              Loading...
+            </>
+          ) : showOverview ? (
+            <>
+              <LineChart size={20} />
+              Hide Trader Overview
+            </>
+          ) : (
+            <>
+              <Layers size={20} />
+              View Trader Overview
+            </>
+          )}
+        </button>
+        <button
+          onClick={() => fetchAssetData(selectedTimeframe)}
+          className="flex items-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-all shadow-lg hover:shadow-xl text-base font-medium disabled:opacity-50"
+          disabled={Object.values(loading).some(Boolean) || !hasAccessToCurrency(selectedAsset.symbol)}
+        >
+          <RefreshCw size={20} />
+          Refresh
+        </button>
+      </div>
+    );
+  };
+
+  if (error.markets && !selectedAsset) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen">
+        <p className="text-red-600 mb-4">{error.markets}</p>
+        <button
+          className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+          onClick={() => fetchMarkets(selectedTimeframe)}
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  if (loading.markets && !selectedAsset && markets.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-4" />
+        <p className="text-gray-600">Loading markets...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-8 space-y-8 max-w-7xl mx-auto bg-gray-50 min-h-screen">
+      {/* Subscription Modal */}
+      {showSubscriptionModal && (
+        <SubscriptionModal
+          onClose={() => setShowSubscriptionModal(false)}
+          onSuccess={() => {
+            setShowSubscriptionModal(false);
+            refreshUser();
+            if (selectedAsset) {
+              fetchAssetData(selectedTimeframe);
+            }
+          }}
+          user={user}
+        />
+      )}
+
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-3xl font-bold text-gray-900">Trader Intelligence Platform</h1>
+        {user && (
+          <div className="flex items-center gap-4">
+            {isFreeTier && (
+              <button
+                onClick={handleUpgradeClick}
+                className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-6 py-3 rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all shadow-lg hover:shadow-xl text-base font-medium"
+              >
+                Upgrade Plan
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="relative max-w-md">
+        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
+        <input
+          type="text"
+          placeholder="Search markets..."
+          className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-base"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+        />
+      </div>
+
+      <div className="flex gap-2 mb-6">
+        {TIMEFRAMES.map((timeframe) => {
+          const hasAccess = hasAccessToTimeframe(timeframe);
+          return (
+            <button
+              key={timeframe}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors relative ${
+                selectedTimeframe === timeframe
+                  ? 'bg-blue-600 text-white shadow-md'
+                  : hasAccess
+                  ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+              }`}
+              onClick={() => hasAccess && setSelectedTimeframe(timeframe)}
+              disabled={!hasAccess}
+            >
+              {timeframe}
+              {!hasAccess && (
+                <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full"></span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {isFreeTier && (
+        <div className="bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-200 rounded-xl p-6 text-center">
+          <Lock size={24} className="text-indigo-600 mx-auto mb-2" />
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">Free Tier Access</h3>
+          <p className="text-gray-600 mb-4">
+            Only 5 coins & 24h timeframe. Upgrade to Enterprise for full access.
+          </p>
+          <button
+            onClick={handleUpgradeClick}
+            className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-6 py-3 rounded-lg hover:from-indigo-700 hover:to-purple-700 transition-all shadow-lg"
+          >
+            Upgrade to Enterprise
+          </button>
+        </div>
+      )}
+
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100">
+        {!selectedAsset ? (
+          <div className="p-8">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-semibold text-gray-900">Markets ({selectedTimeframe})</h2>
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+              {filteredMarkets.length > 0 ? (
+                filteredMarkets.map((market) => (
+                  <MarketCard
+                    key={market?.symbol || Math.random().toString()}
+                    market={market}
+                    onClick={() => setSelectedAsset(market)}
+                  />
+                ))
+              ) : (
+                <p className="text-center text-gray-600 py-8 col-span-full">No markets available</p>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="p-8 space-y-8">
+            <div className="flex items-center justify-between">
+              <button
+                onClick={() => {
+                  setSelectedAsset(null);
+                  setShowOverview(false);
+                }}
+                className="text-blue-600 hover:text-blue-700 transition-colors text-base font-medium"
+              >
+                ← Back to Markets
+              </button>
+              {renderOverviewButton()}
+            </div>
+
+            {/* Show either trader overview or regular analysis */}
+            {showOverview ? (
+              <TraderOverview overview={overview} loading={loading.overview} />
+            ) : (
+              <div>
+                <h2 className="text-4xl font-bold mb-4 text-gray-900">
+                  {(selectedAsset?.symbol || 'N/A')} ({selectedTimeframe})
+                </h2>
+                
+                {/* Price Data */}
+                <div className="bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl p-6 border border-blue-100 mb-8">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold text-gray-900">Price Data</h3>
+                    {currencyRate && (
+                      <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                        selectedAsset?.change >= 0 
+                          ? 'bg-green-100 text-green-800' 
+                          : 'bg-red-100 text-red-800'
+                      }`}>
+                        {selectedAsset?.change >= 0 ? '+' : ''}{selectedAsset?.change?.toFixed(2)}%
+                      </span>
+                    )}
+                  </div>
+                  
+                  {loading.currencyRate ? (
+                    <div className="flex justify-center">
+                      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600" />
+                    </div>
+                  ) : currencyRate && hasAccessToCurrency(selectedAsset.symbol) ? (
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                      <div className="bg-white rounded-lg p-4 border border-gray-200">
+                        <div className="text-sm text-gray-600 mb-1">Current Price</div>
+                        <div className="text-2xl font-bold text-gray-900">
+                          ${currencyRate.rate.toLocaleString(undefined, {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
+                        </div>
+                      </div>
+                      <div className="bg-white rounded-lg p-4 border border-gray-200">
+                        <div className="text-sm text-gray-600 mb-1">Timeframe</div>
+                        <div className="text-lg font-semibold text-gray-900">{currencyRate.timeframe}</div>
+                      </div>
+                      <div className="bg-white rounded-lg p-4 border border-gray-200">
+                        <div className="text-sm text-gray-600 mb-1">Volume</div>
+                        <div className="text-lg font-semibold text-gray-900">
+                          {selectedAsset?.volume?.toLocaleString() || '0'}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="bg-gradient-to-r from-blue-100 to-purple-100 border border-blue-200 rounded-lg p-4 text-center">
+                      <p className="text-gray-700">Price data unavailable</p>
+                    </div>
+                  )}
+                </div>
+
+                {!hasAccessToCurrency(selectedAsset.symbol) ? (
+                  <div className="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-xl p-8 text-center">
+                    <div className="flex items-center justify-center gap-3 mb-4">
+                      <Lock size={32} className="text-blue-600" />
+                      <h3 className="text-xl font-semibold text-gray-900">Upgrade to Access This Currency</h3>
+                    </div>
+                    <p className="text-gray-600 mb-6">
+                      This currency is not available in your current plan. Upgrade to view detailed analytics and insights.
+                    </p>
+                    <button
+                      onClick={handleUpgradeClick}
+                      className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-8 py-3 rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all shadow-lg hover:shadow-xl text-base font-medium"
+                    >
+                      Upgrade to Enterprise
+                    </button>
+                  </div>
+                ) : error.assetData ? (
+                  <div className="bg-red-100 p-6 rounded-xl text-center">
+                    <p className="text-red-800 mb-4">{error.assetData}</p>
+                    <button
+                      className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700"
+                      onClick={() => fetchAssetData(selectedTimeframe)}
+                    >
+                      Retry
+                    </button>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    {/* Left Column */}
+                    <div className="space-y-8">
+                      {/* Market Sentiment */}
+                      <div className="bg-white rounded-2xl p-8 border border-gray-100 shadow-lg">
+                        <div className="flex items-center gap-3 mb-8">
+                          <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
+                            <BarChart3 size={24} className="text-white" />
+                          </div>
+                          <div>
+                            <h3 className="text-2xl font-bold text-gray-900">Market Sentiment</h3>
+                            <p className="text-gray-500">Real-time market mood analysis</p>
+                          </div>
+                        </div>
+
+                        {loading.sentiment ? (
+                          <div className="flex justify-center">
+                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600" />
+                          </div>
+                        ) : sentiment ? (
+                          <div className="space-y-8">
+                            <div className="grid grid-cols-3 gap-8">
+                              {/* Bullish */}
+                              <div className="text-center">
+                                <div className="relative w-24 h-24 mx-auto mb-4">
+                                  <svg className="w-24 h-24 transform -rotate-90" viewBox="0 0 100 100">
+                                    <circle
+                                      cx="50"
+                                      cy="50"
+                                      r="40"
+                                      stroke="currentColor"
+                                      strokeWidth="8"
+                                      fill="transparent"
+                                      className="text-gray-200"
+                                    />
+                                    <circle
+                                      cx="50"
+                                      cy="50"
+                                      r="40"
+                                      stroke="currentColor"
+                                      strokeWidth="8"
+                                      fill="transparent"
+                                      strokeDasharray={`${2 * Math.PI * 40}`}
+                                      strokeDashoffset={`${2 * Math.PI * 40 * (1 - (sentiment.bullish || 0) / 100)}`}
+                                      className="text-green-500 transition-all duration-1000 ease-out"
+                                      strokeLinecap="round"
+                                    />
+                                  </svg>
+                                  <div className="absolute inset-0 flex items-center justify-center">
+                                    <div className="text-center">
+                                      <div className="text-xl font-bold text-green-600">{sentiment.bullish || 0}%</div>
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="flex items-center justify-center gap-2">
+                                  <TrendingUp size={18} className="text-green-500" />
+                                  <span className="font-semibold text-gray-900">Bullish</span>
+                                </div>
+                              </div>
+
+                              {/* Bearish */}
+                              <div className="text-center">
+                                <div className="relative w-24 h-24 mx-auto mb-4">
+                                  <svg className="w-24 h-24 transform -rotate-90" viewBox="0 0 100 100">
+                                    <circle
+                                      cx="50"
+                                      cy="50"
+                                      r="40"
+                                      stroke="currentColor"
+                                      strokeWidth="8"
+                                      fill="transparent"
+                                      className="text-gray-200"
+                                    />
+                                    <circle
+                                      cx="50"
+                                      cy="50"
+                                      r="40"
+                                      stroke="currentColor"
+                                      strokeWidth="8"
+                                      fill="transparent"
+                                      strokeDasharray={`${2 * Math.PI * 40}`}
+                                      strokeDashoffset={`${2 * Math.PI * 40 * (1 - (sentiment.bearish || 0) / 100)}`}
+                                      className="text-red-500 transition-all duration-1000 ease-out"
+                                      strokeLinecap="round"
+                                    />
+                                  </svg>
+                                  <div className="absolute inset-0 flex items-center justify-center">
+                                    <div className="text-center">
+                                      <div className="text-xl font-bold text-red-600">{sentiment.bearish || 0}%</div>
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="flex items-center justify-center gap-2">
+                                  <TrendingDown size={18} className="text-red-500" />
+                                  <span className="font-semibold text-gray-900">Bearish</span>
+                                </div>
+                              </div>
+
+                              {/* Neutral */}
+                              <div className="text-center">
+                                <div className="relative w-24 h-24 mx-auto mb-4">
+                                  <svg className="w-24 h-24 transform -rotate-90" viewBox="0 0 100 100">
+                                    <circle
+                                      cx="50"
+                                      cy="50"
+                                      r="40"
+                                      stroke="currentColor"
+                                      strokeWidth="8"
+                                      fill="transparent"
+                                      className="text-gray-200"
+                                    />
+                                    <circle
+                                      cx="50"
+                                      cy="50"
+                                      r="40"
+                                      stroke="currentColor"
+                                      strokeWidth="8"
+                                      fill="transparent"
+                                      strokeDasharray={`${2 * Math.PI * 40}`}
+                                      strokeDashoffset={`${2 * Math.PI * 40 * (1 - (sentiment.neutral || 0) / 100)}`}
+                                      className="text-blue-500 transition-all duration-1000 ease-out"
+                                      strokeLinecap="round"
+                                    />
+                                  </svg>
+                                  <div className="absolute inset-0 flex items-center justify-center">
+                                    <div className="text-center">
+                                      <div className="text-xl font-bold text-blue-600">{sentiment.neutral || 0}%</div>
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="flex items-center justify-center gap-2">
+                                  <LineChart size={18} className="text-blue-500" />
+                                  <span className="font-semibold text-gray-900">Neutral</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Sentiment Summary */}
+                            <div className="bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl p-6 border border-blue-100">
+                              <div className="flex items-start gap-3">
+                                <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0 mt-1">
+                                  <Sparkles size={16} className="text-blue-600" />
+                                </div>
+                                <div>
+                                  <h4 className="font-semibold text-gray-900 mb-2">Sentiment Summary</h4>
+                                  <p className="text-sm text-gray-600 leading-relaxed">
+                                    {sentiment.bullish > sentiment.bearish
+                                      ? 'The market shows strong bullish sentiment with positive momentum. Traders are optimistic about future price movements.'
+                                      : sentiment.bearish > sentiment.bullish
+                                      ? 'Bearish sentiment dominates the market with increased caution among investors. Risk management is crucial.'
+                                      : 'Market sentiment is balanced with mixed signals. Traders are waiting for clearer direction.'}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-xl p-4 text-center">
+                            <div className="flex items-center justify-center gap-3 mb-2">
+                              <Lock size={20} className="text-blue-600" />
+                              <h4 className="text-sm font-semibold text-gray-900">Sentiment Data Unavailable</h4>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Market Psychology */}
+                      <div className="bg-white rounded-2xl p-8 border border-gray-100 shadow-lg">
+                        <div className="flex items-center gap-3 mb-8">
+                          <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-pink-600 rounded-lg flex items-center justify-center">
+                            <Brain size={24} className="text-white" />
+                          </div>
+                          <div>
+                            <h3 className="text-2xl font-bold text-gray-900">Market Psychology</h3>
+                            <p className="text-gray-500">Psychological indicators and market behavior</p>
+                          </div>
+                        </div>
+
+                        {loading.psychology ? (
+                          <div className="flex justify-center">
+                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600" />
+                          </div>
+                        ) : psychology ? (
+                          <div className="space-y-6">
+                            <PsychologyIndicator 
+                              label="Fear" 
+                              value={psychology.fear} 
+                              icon={<AlertCircle size={16} />}
+                              color="red"
+                            />
+                            <PsychologyIndicator 
+                              label="Greed" 
+                              value={psychology.greed} 
+                              icon={<Zap size={16} />}
+                              color="green"
+                            />
+                            <PsychologyIndicator 
+                              label="Momentum" 
+                              value={psychology.momentum} 
+                              icon={<TrendingUpIcon size={16} />}
+                              color="blue"
+                            />
+                            <PsychologyIndicator 
+                              label="Volatility" 
+                              value={psychology.volatility} 
+                              icon={<Activity size={16} />}
+                              color="purple"
+                            />
+                          </div>
+                        ) : isFreeTier ? (
+                          <div className="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-xl p-4 text-center">
+                            <div className="flex items-center justify-center gap-3 mb-2">
+                              <Lock size={20} className="text-blue-600" />
+                              <h4 className="text-sm font-semibold text-gray-900">Psychology Data Locked</h4>
+                            </div>
+                            <p className="text-sm text-gray-600">Upgrade to view market psychology data.</p>
+                          </div>
+                        ) : (
+                          <div className="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-xl p-4 text-center">
+                            <div className="flex items-center justify-center gap-3 mb-2">
+                              <Lock size={20} className="text-blue-600" />
+                              <h4 className="text-sm font-semibold text-gray-900">Psychology Data Unavailable</h4>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Right Column */}
+                    <div className="space-y-8">
+                      {/* Support & Resistance */}
+                      <div className="bg-white rounded-2xl p-8 border border-gray-100 shadow-lg">
+                        <div className="flex items-center gap-3 mb-8">
+                          <div className="w-12 h-12 bg-gradient-to-br from-green-500 to-emerald-600 rounded-lg flex items-center justify-center">
+                            <Scale size={24} className="text-white" />
+                          </div>
+                          <div>
+                            <h3 className="text-2xl font-bold text-gray-900">Support & Resistance</h3>
+                            <p className="text-gray-500">Key price levels and breakout analysis</p>
+                          </div>
+                        </div>
+
+                        {loading.supportResistance ? (
+                          <div className="flex justify-center">
+                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600" />
+                          </div>
+                        ) : supportResistance ? (
+                          <SupportResistanceCard 
+                            srData={supportResistance} 
+                            currentPrice={currencyRate?.rate}
+                            selectedAsset={selectedAsset}
+                          />
+                        ) : (
+                          <div className="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-xl p-4 text-center">
+                            <div className="flex items-center justify-center gap-3 mb-2">
+                              <Lock size={20} className="text-blue-600" />
+                              <h4 className="text-sm font-semibold text-gray-900">Support/Resistance Data Unavailable</h4>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Additional Stats */}
+                      <div className="bg-white rounded-2xl p-8 border border-gray-100 shadow-lg">
+                        <div className="flex items-center gap-3 mb-6">
+                          <div className="w-10 h-10 bg-gradient-to-br from-yellow-500 to-orange-600 rounded-lg flex items-center justify-center">
+                            <Gauge size={20} className="text-white" />
+                          </div>
+                          <h3 className="text-xl font-semibold text-gray-900">Market Statistics</h3>
+                        </div>
+                        
+                        <div className="space-y-4">
+                          <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+                            <span className="text-sm text-gray-600">Timeframe</span>
+                            <span className="font-semibold text-gray-900">{selectedTimeframe}</span>
+                          </div>
+                          
+                          <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+                            <span className="text-sm text-gray-600">Category</span>
+                            <span className="font-semibold text-gray-900 uppercase">{selectedAsset?.category || 'crypto'}</span>
+                          </div>
+                          
+                          <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+                            <span className="text-sm text-gray-600">Data Freshness</span>
+                            <span className="font-semibold text-gray-900">Live</span>
+                          </div>
+                          
+                          <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+                            <span className="text-sm text-gray-600">Analysis Confidence</span>
+                            <span className="font-semibold text-gray-900">
+                              {sentiment && psychology ? 'High' : 'Medium'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}; 
