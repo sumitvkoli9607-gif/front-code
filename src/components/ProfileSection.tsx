@@ -15,7 +15,11 @@ import {
   Copy,
   ExternalLink,
   Zap,
-  Bot
+  Bot,
+  Activity,
+  TestTube,
+  Wifi,
+  RefreshCw
 } from 'lucide-react';
 
 interface TelegramStatus {
@@ -31,6 +35,9 @@ interface NotificationSettings {
   supportResistanceAlerts: boolean;
   majorMovementAlerts: boolean;
   overviewAlerts: boolean;
+  sentimentShiftAlerts: boolean;
+  alertThreshold?: number;
+  notificationFrequency?: string;
 }
 
 export default function TelegramIntegration() {
@@ -39,18 +46,21 @@ export default function TelegramIntegration() {
   const [isLoading, setIsLoading] = useState(true);
   const [isLinking, setIsLinking] = useState(false);
   const [isUnlinking, setIsUnlinking] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
+  const [isTestingConnection, setIsTestingConnection] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [settings, setSettings] = useState<NotificationSettings>({
-    telegramNotifications: true,
+    telegramNotifications: false,
     priceAlerts: true,
     supportResistanceAlerts: true,
     majorMovementAlerts: true,
-    overviewAlerts: true
+    overviewAlerts: true,
+    sentimentShiftAlerts: true
   });
 
-  const API_BASE = import.meta.env.VITE_API_URL;
-  const BOT_USERNAME = '@TrademinoProBot'; // Replace with your actual bot username
+  const API_BASE = import.meta.env.VITE_API_URL || window.location.origin;
+  const BOT_USERNAME = '@TrademinoProBot';
   const BOT_LINK = `https://t.me/${BOT_USERNAME.replace('@', '')}`;
 
   useEffect(() => {
@@ -60,27 +70,63 @@ export default function TelegramIntegration() {
   const fetchTelegramStatus = async () => {
     try {
       const token = localStorage.getItem('token');
-      if (!token) throw new Error('No authentication token');
+      if (!token) {
+        throw new Error('No authentication token found. Please log in again.');
+      }
+
+      console.log('Fetching Telegram status from:', `${API_BASE}/api/telegram/status`);
 
       const res = await fetch(`${API_BASE}/api/telegram/status`, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
       });
 
-      if (!res.ok) throw new Error('Failed to fetch status');
+      console.log('Status response:', res.status, res.statusText);
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error('Status fetch error:', errorText);
+        throw new Error(`Failed to fetch status: ${res.status} ${res.statusText}`);
+      }
       
       const data = await res.json();
+      console.log('Telegram Status Data:', data);
       setStatus(data);
       
       // Fetch notification settings
+      console.log('Fetching notification settings...');
       const settingsRes = await fetch(`${API_BASE}/api/notification-settings`, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
       });
       
       if (settingsRes.ok) {
         const settingsData = await settingsRes.json();
-        setSettings(settingsData);
+        console.log('Notification Settings Data:', settingsData);
+        
+        // Ensure all required fields are present
+        const completeSettings: NotificationSettings = {
+          telegramNotifications: settingsData.telegramNotifications ?? false,
+          priceAlerts: settingsData.priceAlerts ?? true,
+          supportResistanceAlerts: settingsData.supportResistanceAlerts ?? true,
+          majorMovementAlerts: settingsData.majorMovementAlerts ?? true,
+          overviewAlerts: settingsData.overviewAlerts ?? true,
+          sentimentShiftAlerts: settingsData.sentimentShiftAlerts ?? true,
+          alertThreshold: settingsData.alertThreshold,
+          notificationFrequency: settingsData.notificationFrequency
+        };
+        
+        setSettings(completeSettings);
+      } else {
+        console.error('Settings fetch failed:', await settingsRes.text());
+        setError('Failed to load notification settings');
       }
     } catch (err) {
+      console.error('Error in fetchTelegramStatus:', err);
       setError(err instanceof Error ? err.message : 'Failed to load Telegram status');
     } finally {
       setIsLoading(false);
@@ -101,25 +147,39 @@ export default function TelegramIntegration() {
       const token = localStorage.getItem('token');
       if (!token) throw new Error('No authentication token');
 
+      console.log('Linking account with code:', linkCode);
+
       const res = await fetch(`${API_BASE}/api/telegram/link`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
+          'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({ token: linkCode.trim().toUpperCase() })
+        body: JSON.stringify({ token: linkCode.trim() })
       });
 
-      const data = await res.json();
+      const responseText = await res.text();
+      console.log('Link response:', res.status, responseText);
 
       if (!res.ok) {
-        throw new Error(data.error || 'Failed to link account');
+        let errorMessage = 'Failed to link account';
+        try {
+          const errorData = JSON.parse(responseText);
+          errorMessage = errorData.error || errorMessage;
+        } catch (e) {
+          errorMessage = responseText || errorMessage;
+        }
+        throw new Error(errorMessage);
       }
+
+      const data = JSON.parse(responseText);
+      console.log('Link success:', data);
 
       setSuccess('🎉 Telegram account linked successfully! You will now receive real-time trading signals.');
       setLinkCode('');
       await fetchTelegramStatus(); // Refresh status
     } catch (err) {
+      console.error('Link error:', err);
       setError(err instanceof Error ? err.message : 'Linking failed');
     } finally {
       setIsLinking(false);
@@ -127,6 +187,10 @@ export default function TelegramIntegration() {
   };
 
   const handleUnlinkAccount = async () => {
+    if (!confirm('Are you sure you want to unlink your Telegram account?')) {
+      return;
+    }
+
     setIsUnlinking(true);
     setError('');
     setSuccess('');
@@ -135,20 +199,34 @@ export default function TelegramIntegration() {
       const token = localStorage.getItem('token');
       if (!token) throw new Error('No authentication token');
 
+      console.log('Unlinking account...');
+
       const res = await fetch(`${API_BASE}/api/telegram/unlink`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
       });
 
-      const data = await res.json();
+      const responseText = await res.text();
+      console.log('Unlink response:', res.status, responseText);
 
       if (!res.ok) {
-        throw new Error(data.error || 'Failed to unlink account');
+        let errorMessage = 'Failed to unlink account';
+        try {
+          const errorData = JSON.parse(responseText);
+          errorMessage = errorData.error || errorMessage;
+        } catch (e) {
+          errorMessage = responseText || errorMessage;
+        }
+        throw new Error(errorMessage);
       }
 
       setSuccess('🔗 Telegram account unlinked successfully.');
       await fetchTelegramStatus(); // Refresh status
     } catch (err) {
+      console.error('Unlink error:', err);
       setError(err instanceof Error ? err.message : 'Unlinking failed');
     } finally {
       setIsUnlinking(false);
@@ -160,25 +238,141 @@ export default function TelegramIntegration() {
       const token = localStorage.getItem('token');
       if (!token) throw new Error('No authentication token');
 
-      const updatedSettings = { ...settings, [setting]: value };
-      setSettings(updatedSettings);
+      console.log('Changing setting:', {
+        setting,
+        value,
+        currentSettings: settings
+      });
+
+      const updatedSettings = { 
+        ...settings, 
+        [setting]: value 
+      };
+      
+      console.log('Sending to server:', updatedSettings);
 
       const res = await fetch(`${API_BASE}/api/notification-settings`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
+          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify(updatedSettings)
       });
 
+      const responseText = await res.text();
+      console.log('Server response:', {
+        status: res.status,
+        statusText: res.statusText,
+        body: responseText
+      });
+
       if (!res.ok) {
-        // Revert on error
-        setSettings(settings);
-        throw new Error('Failed to update settings');
+        let errorMessage = 'Failed to update settings';
+        try {
+          const errorData = JSON.parse(responseText);
+          errorMessage = errorData.error || errorData.details || errorMessage;
+        } catch (e) {
+          errorMessage = responseText || errorMessage;
+        }
+        throw new Error(errorMessage);
+      }
+
+      const data = JSON.parse(responseText);
+      console.log('Update successful:', data);
+      
+      // Update local state only after successful server update
+      setSettings(updatedSettings);
+      setSuccess(`✅ ${setting.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())} ${value ? 'enabled' : 'disabled'} successfully`);
+      setTimeout(() => setSuccess(''), 3000);
+      
+    } catch (err) {
+      console.error('Update error details:', err);
+      setError(err instanceof Error ? err.message : 'Failed to update settings');
+      
+      // Refresh settings from server on error
+      await fetchTelegramStatus();
+    }
+  };
+
+  const handleTestConnection = async () => {
+    setIsTestingConnection(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) throw new Error('No authentication token');
+
+      console.log('Testing connection to:', `${API_BASE}/api/test/connection`);
+
+      const res = await fetch(`${API_BASE}/api/test/connection`, {
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      const responseText = await res.text();
+      console.log('Connection test response:', res.status, responseText);
+
+      if (res.ok) {
+        const data = JSON.parse(responseText);
+        setSuccess(`✅ Connection successful! User: ${data.email}`);
+      } else {
+        throw new Error(`Connection failed: ${res.status} ${res.statusText}`);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update settings');
+      console.error('Connection test error:', err);
+      setError(err instanceof Error ? err.message : 'Connection test failed');
+    } finally {
+      setIsTestingConnection(false);
+    }
+  };
+
+  const handleTestNotification = async () => {
+    setIsTesting(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) throw new Error('No authentication token');
+
+      console.log('Sending test notification...');
+
+      const res = await fetch(`${API_BASE}/api/test/notification`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          type: 'TEST',
+          symbol: 'BTC/USDT'
+        })
+      });
+
+      const responseText = await res.text();
+      console.log('Test notification response:', res.status, responseText);
+
+      if (res.ok) {
+        setSuccess('✅ Test notification sent! Check your Telegram.');
+      } else {
+        let errorMessage = 'Failed to send test notification';
+        try {
+          const errorData = JSON.parse(responseText);
+          errorMessage = errorData.error || errorMessage;
+        } catch (e) {
+          errorMessage = responseText || errorMessage;
+        }
+        throw new Error(errorMessage);
+      }
+    } catch (err) {
+      console.error('Test notification error:', err);
+      setError(err instanceof Error ? err.message : 'Failed to send test notification');
+    } finally {
+      setIsTesting(false);
     }
   };
 
@@ -192,19 +386,29 @@ export default function TelegramIntegration() {
     window.open(BOT_LINK, '_blank');
   };
 
+  const refreshStatus = async () => {
+    setIsLoading(true);
+    setError('');
+    setSuccess('Refreshing...');
+    await fetchTelegramStatus();
+    setSuccess('Status refreshed successfully!');
+    setTimeout(() => setSuccess(''), 2000);
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center p-12">
-        <div className="text-center">
-          <Loader2 className="w-8 h-8 animate-spin text-blue-500 mx-auto mb-3" />
+        <div className="text-center space-y-4">
+          <Loader2 className="w-10 h-10 animate-spin text-blue-500 mx-auto" />
           <p className="text-sm text-gray-600">Loading Telegram settings...</p>
+          <p className="text-xs text-gray-500">API Base: {API_BASE}</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="max-w-4xl mx-auto p-4 space-y-6">
+    <div className="max-w-6xl mx-auto p-4 space-y-6">
       {/* Header */}
       <div className="bg-gradient-to-r from-blue-600 to-indigo-700 rounded-2xl p-6 text-white">
         <div className="flex items-center justify-between">
@@ -217,17 +421,58 @@ export default function TelegramIntegration() {
               <p className="text-blue-100 opacity-90">Get real-time signals & alerts directly in Telegram</p>
             </div>
           </div>
-          {status?.linked && (
-            <div className="bg-green-500/20 backdrop-blur-sm border border-green-400/30 px-4 py-2 rounded-xl flex items-center space-x-2">
-              <CheckCircle className="w-5 h-5 text-green-300" />
-              <span className="font-semibold text-green-100">Connected</span>
-            </div>
-          )}
+          <div className="flex items-center space-x-3">
+            <button
+              onClick={refreshStatus}
+              className="p-2 bg-white/20 hover:bg-white/30 rounded-lg transition-colors"
+              title="Refresh status"
+            >
+              <RefreshCw className="w-5 h-5" />
+            </button>
+            {status?.linked ? (
+              <div className="bg-green-500/20 backdrop-blur-sm border border-green-400/30 px-4 py-2 rounded-xl flex items-center space-x-2">
+                <CheckCircle className="w-5 h-5 text-green-300" />
+                <span className="font-semibold text-green-100">Connected</span>
+              </div>
+            ) : (
+              <div className="bg-yellow-500/20 backdrop-blur-sm border border-yellow-400/30 px-4 py-2 rounded-xl flex items-center space-x-2">
+                <XCircle className="w-5 h-5 text-yellow-300" />
+                <span className="font-semibold text-yellow-100">Not Connected</span>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
+      {/* Error/Success Messages */}
+      {error && (
+        <div className="p-4 bg-red-50 border border-red-200 rounded-xl flex items-start space-x-3">
+          <XCircle className="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" />
+          <div className="flex-1">
+            <p className="text-red-800 font-medium">Error</p>
+            <p className="text-red-700 text-sm mt-1">{error}</p>
+            <button
+              onClick={() => setError('')}
+              className="mt-2 text-xs text-red-600 hover:text-red-800"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
+      {success && (
+        <div className="p-4 bg-green-50 border border-green-200 rounded-xl flex items-start space-x-3">
+          <CheckCircle className="w-5 h-5 text-green-500 mt-0.5 flex-shrink-0" />
+          <div className="flex-1">
+            <p className="text-green-800 font-medium">Success</p>
+            <p className="text-green-700 text-sm mt-1">{success}</p>
+          </div>
+        </div>
+      )}
+
       {/* Status Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="bg-white rounded-xl border border-gray-200 p-5">
           <div className="flex items-center justify-between mb-3">
             <div className="bg-blue-100 p-2 rounded-lg">
@@ -266,6 +511,23 @@ export default function TelegramIntegration() {
           <h3 className="font-bold text-gray-900 mb-1">Security</h3>
           <p className="text-sm text-gray-600">End-to-end encrypted</p>
         </div>
+
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div className="bg-orange-100 p-2 rounded-lg">
+              <Wifi className="w-5 h-5 text-orange-600" />
+            </div>
+            <button
+              onClick={handleTestConnection}
+              disabled={isTestingConnection}
+              className="text-xs font-semibold bg-blue-100 text-blue-800 px-3 py-1 rounded-full hover:bg-blue-200 disabled:opacity-50"
+            >
+              {isTestingConnection ? 'Testing...' : 'Test Connection'}
+            </button>
+          </div>
+          <h3 className="font-bold text-gray-900 mb-1">Connection</h3>
+          <p className="text-sm text-gray-600">API: {API_BASE.replace('https://', '')}</p>
+        </div>
       </div>
 
       {/* Main Content */}
@@ -290,26 +552,6 @@ export default function TelegramIntegration() {
               )}
             </div>
 
-            {error && (
-              <div className="mb-5 p-4 bg-red-50 border border-red-200 rounded-xl flex items-start space-x-3">
-                <XCircle className="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" />
-                <div className="flex-1">
-                  <p className="text-red-800 font-medium">Connection Error</p>
-                  <p className="text-red-700 text-sm mt-1">{error}</p>
-                </div>
-              </div>
-            )}
-
-            {success && (
-              <div className="mb-5 p-4 bg-green-50 border border-green-200 rounded-xl flex items-start space-x-3">
-                <CheckCircle className="w-5 h-5 text-green-500 mt-0.5 flex-shrink-0" />
-                <div className="flex-1">
-                  <p className="text-green-800 font-medium">Success</p>
-                  <p className="text-green-700 text-sm mt-1">{success}</p>
-                </div>
-              </div>
-            )}
-
             {!status?.linked ? (
               <div className="space-y-6">
                 {/* Bot Info Card */}
@@ -327,14 +569,14 @@ export default function TelegramIntegration() {
                     <div className="flex space-x-2">
                       <button
                         onClick={copyBotUsername}
-                        className="px-3 py-1.5 bg-white border border-blue-300 text-blue-700 rounded-lg text-sm font-medium hover:bg-blue-50 flex items-center space-x-1"
+                        className="px-3 py-1.5 bg-white border border-blue-300 text-blue-700 rounded-lg text-sm font-medium hover:bg-blue-50 flex items-center space-x-1 transition-colors"
                       >
                         <Copy className="w-3.5 h-3.5" />
                         <span>Copy</span>
                       </button>
                       <button
                         onClick={openBotLink}
-                        className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center space-x-1"
+                        className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center space-x-1 transition-colors"
                       >
                         <ExternalLink className="w-3.5 h-3.5" />
                         <span>Open</span>
@@ -377,10 +619,10 @@ export default function TelegramIntegration() {
                         <input
                           type="text"
                           value={linkCode}
-                          onChange={(e) => setLinkCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
+                          onChange={(e) => setLinkCode(e.target.value.replace(/[^a-zA-Z0-9]/g, '').toUpperCase())}
                           placeholder="ABCD1234"
                           maxLength={8}
-                          className="w-full px-4 py-3 text-lg font-mono tracking-widest text-center border-2 border-blue-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          className="w-full px-4 py-3 text-lg font-mono tracking-widest text-center border-2 border-blue-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
                         />
                         <div className="absolute right-3 top-1/2 transform -translate-y-1/2 text-xs text-gray-400 font-mono">
                           {8 - linkCode.length}
@@ -466,10 +708,20 @@ export default function TelegramIntegration() {
           {/* Notification Settings */}
           {status?.linked && (
             <div className="bg-white rounded-xl border border-gray-200 p-6">
-              <h2 className="text-lg font-bold text-gray-900 mb-6 flex items-center">
-                <Bell className="w-5 h-5 mr-2 text-blue-600" />
-                Notification Settings
-              </h2>
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-lg font-bold text-gray-900 flex items-center">
+                  <Bell className="w-5 h-5 mr-2 text-blue-600" />
+                  Notification Settings
+                </h2>
+                <button
+                  onClick={handleTestNotification}
+                  disabled={isTesting || !settings.telegramNotifications}
+                  className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
+                >
+                  <TestTube className="w-4 h-4" />
+                  <span>{isTesting ? 'Sending...' : 'Send Test'}</span>
+                </button>
+              </div>
               
               <div className="space-y-4">
                 {/* Master Toggle */}
@@ -528,6 +780,14 @@ export default function TelegramIntegration() {
                       description: 'Daily market analysis and summary',
                       color: 'text-purple-600',
                       bgColor: 'bg-purple-100'
+                    },
+                    {
+                      key: 'sentimentShiftAlerts' as const,
+                      icon: Activity,
+                      title: 'Sentiment Shift Alerts',
+                      description: 'Market sentiment changes and shifts',
+                      color: 'text-pink-600',
+                      bgColor: 'bg-pink-100'
                     }
                   ].map((item) => (
                     <div 
@@ -615,19 +875,53 @@ export default function TelegramIntegration() {
           {/* Quick Stats */}
           {status?.linked && (
             <div className="bg-white rounded-xl border border-gray-200 p-5">
-              <h3 className="font-bold text-gray-900 mb-4">📊 Notification Stats</h3>
+              <h3 className="font-bold text-gray-900 mb-4">📊 Status</h3>
               <div className="space-y-3">
                 <div className="flex justify-between items-center">
-                  <span className="text-sm text-gray-600">Total Connected</span>
-                  <span className="font-semibold text-gray-900">Active</span>
+                  <span className="text-sm text-gray-600">Connection</span>
+                  <span className="font-semibold text-green-600">Active</span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-sm text-gray-600">Last Signal</span>
-                  <span className="font-semibold text-gray-900">Just now</span>
+                  <span className="text-sm text-gray-600">Notifications</span>
+                  <span className={`font-semibold ${settings.telegramNotifications ? 'text-green-600' : 'text-red-600'}`}>
+                    {settings.telegramNotifications ? 'Enabled' : 'Disabled'}
+                  </span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-sm text-gray-600">Delivery Rate</span>
-                  <span className="font-semibold text-green-600">99.9%</span>
+                  <span className="text-sm text-gray-600">Active Alerts</span>
+                  <span className="font-semibold text-blue-600">
+                    {Object.values(settings).filter(v => v === true).length - 1}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-gray-600">Last Updated</span>
+                  <span className="font-semibold text-gray-900">
+                    {status.linkedAt ? new Date(status.linkedAt).toLocaleDateString() : 'N/A'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Debug Info (Only in development) */}
+          {import.meta.env.DEV && (
+            <div className="bg-gray-900 text-white rounded-xl p-5 font-mono">
+              <h3 className="font-bold mb-4 text-gray-300">🔧 Debug Info</h3>
+              <div className="space-y-2 text-xs">
+                <div>API: {API_BASE}</div>
+                <div>Status: {JSON.stringify(status)}</div>
+                <div>Settings: {JSON.stringify(settings)}</div>
+                <div className="pt-2 border-t border-gray-700">
+                  <button
+                    onClick={() => {
+                      console.log('Status:', status);
+                      console.log('Settings:', settings);
+                      console.log('API Base:', API_BASE);
+                    }}
+                    className="text-blue-400 hover:text-blue-300"
+                  >
+                    Log to Console
+                  </button>
                 </div>
               </div>
             </div>
@@ -642,11 +936,16 @@ export default function TelegramIntegration() {
             <p className="font-medium text-gray-900 mb-1">🔒 Secure & Encrypted</p>
             <p>Your data is encrypted end-to-end. We never store your messages.</p>
           </div>
-          <div className="flex items-center space-x-2">
-            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-            <span className="text-sm font-medium text-green-600">
-              Bot Status: {status?.linked ? 'Connected & Active' : 'Ready to Connect'}
-            </span>
+          <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-2">
+              <div className={`w-2 h-2 rounded-full ${status?.linked ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
+              <span className="text-sm font-medium">
+                Bot: {status?.linked ? 'Connected' : 'Not Connected'}
+              </span>
+            </div>
+            <div className="text-sm text-gray-500">
+              v1.0.0 • {new Date().toLocaleDateString()}
+            </div>
           </div>
         </div>
       </div>

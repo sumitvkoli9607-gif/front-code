@@ -66,7 +66,7 @@ interface SessionExpiredModalProps {
 
 interface TelegramUser {
   linked: boolean;
-  telegramId?: string;
+  telegramId?: string | number; // Allow both string and number
   notificationEnabled: boolean;
   linkedAt?: string;
 }
@@ -206,7 +206,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
         headers: { Authorization: `Bearer ${authToken}` },
       });
       
-      setTelegramUser(statusResponse.data);
+      // Normalize telegramId to string if it exists
+      const telegramData = statusResponse.data;
+      if (telegramData && telegramData.telegramId) {
+        telegramData.telegramId = String(telegramData.telegramId);
+      }
+      
+      setTelegramUser(telegramData);
       
       // Load notification settings
       const settingsResponse = await axios.get(`${import.meta.env.VITE_API_URL}/api/notification-settings`, {
@@ -463,7 +469,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <div className="text-xs text-gray-500 pl-4 space-y-1">
             <div className="flex items-center gap-1">
               <MessageSquare size={10} />
-              <span>ID: {telegramUser.telegramId?.substring(0, 8)}...</span>
+              {/* FIX: Safely convert telegramId to string before using substring */}
+              <span>ID: {String(telegramUser.telegramId || '').substring(0, 8)}...</span>
             </div>
             <div className="flex items-center gap-1">
               <Bell size={10} />
