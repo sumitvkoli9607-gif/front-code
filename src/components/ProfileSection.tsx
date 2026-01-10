@@ -149,6 +149,7 @@ export default function TelegramIntegration() {
 
       console.log('Linking account with code:', linkCode);
 
+      // Send the code as-is (preserving lowercase/uppercase)
       const res = await fetch(`${API_BASE}/api/telegram/link`, {
         method: 'POST',
         headers: {
@@ -395,6 +396,10 @@ export default function TelegramIntegration() {
     setTimeout(() => setSuccess(''), 2000);
   };
 
+  // Helper function to format link code input
+
+  // Helper function to validate link code format
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center p-12">
@@ -604,7 +609,7 @@ export default function TelegramIntegration() {
                       </li>
                       <li className="flex items-start">
                         <span className="bg-blue-100 text-blue-700 font-bold rounded-full w-6 h-6 flex items-center justify-center mr-3 flex-shrink-0 text-xs">4</span>
-                        Enter the 8-digit code below
+                        Enter the 8-digit code below (case-sensitive)
                       </li>
                     </ol>
                   </div>
@@ -612,17 +617,25 @@ export default function TelegramIntegration() {
                   {/* Code Input */}
                   <div className="space-y-3">
                     <label className="block text-sm font-semibold text-gray-900">
-                      Enter Linking Code
+                      Enter Linking Code (8 characters)
                     </label>
                     <div className="flex space-x-2">
                       <div className="flex-1 relative">
                         <input
                           type="text"
                           value={linkCode}
-                          onChange={(e) => setLinkCode(e.target.value.replace(/[^a-zA-Z0-9]/g, '').toUpperCase())}
-                          placeholder="ABCD1234"
+                          onChange={(e) => {
+                            // Allow any alphanumeric characters (case-sensitive)
+                            const input = e.target.value.replace(/[^a-zA-Z0-9]/g, '');
+                            // Limit to 8 characters
+                            const trimmed = input.slice(0, 8);
+                            setLinkCode(trimmed);
+                          }}
+                          placeholder="e.g., abc12345 or ABC12345"
                           maxLength={8}
                           className="w-full px-4 py-3 text-lg font-mono tracking-widest text-center border-2 border-blue-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
+                          spellCheck="false"
+                          autoComplete="off"
                         />
                         <div className="absolute right-3 top-1/2 transform -translate-y-1/2 text-xs text-gray-400 font-mono">
                           {8 - linkCode.length}
@@ -647,8 +660,18 @@ export default function TelegramIntegration() {
                       </button>
                     </div>
                     <p className="text-xs text-gray-500 text-center">
-                      Code expires in 15 minutes • Refresh code with /link in Telegram
+                      Enter the exact 8-character code • Case-sensitive • Expires in 15 minutes
                     </p>
+                    <div className="flex items-center justify-center space-x-2 text-xs text-gray-500">
+                      <div className="flex items-center">
+                        <div className="w-2 h-2 rounded-full bg-blue-500 mr-1"></div>
+                        Accepts: A-Z, a-z, 0-9
+                      </div>
+                      <div className="flex items-center">
+                        <div className="w-2 h-2 rounded-full bg-green-500 mr-1"></div>
+                        Letters can be lowercase or uppercase
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -904,28 +927,6 @@ export default function TelegramIntegration() {
           )}
 
           {/* Debug Info (Only in development) */}
-          {import.meta.env.DEV && (
-            <div className="bg-gray-900 text-white rounded-xl p-5 font-mono">
-              <h3 className="font-bold mb-4 text-gray-300">🔧 Debug Info</h3>
-              <div className="space-y-2 text-xs">
-                <div>API: {API_BASE}</div>
-                <div>Status: {JSON.stringify(status)}</div>
-                <div>Settings: {JSON.stringify(settings)}</div>
-                <div className="pt-2 border-t border-gray-700">
-                  <button
-                    onClick={() => {
-                      console.log('Status:', status);
-                      console.log('Settings:', settings);
-                      console.log('API Base:', API_BASE);
-                    }}
-                    className="text-blue-400 hover:text-blue-300"
-                  >
-                    Log to Console
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
         </div>
       </div>
 
