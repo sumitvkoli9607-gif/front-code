@@ -19,7 +19,8 @@ import {
 import { MarketSection } from './MarketSection';
 import { SubscriptionModal } from './SubscriptionModal';
 import AITools from './AITools';
-import TelegramVerification from './ProfileSection'; // Updated import
+import Logo from '../../logo.png';
+import TelegramVerification from './ProfileSection';
 import PairAnalyzer from './PairAnalyzer';
 import axios from 'axios';
 
@@ -66,7 +67,7 @@ interface SessionExpiredModalProps {
 
 interface TelegramUser {
   linked: boolean;
-  telegramId?: string | number; // Allow both string and number
+  telegramId?: string | number;
   notificationEnabled: boolean;
   linkedAt?: string;
 }
@@ -167,13 +168,36 @@ export const Dashboard: React.FC<DashboardProps> = ({
     setLastActivityTime(Date.now());
   }, []);
 
-  // Get token from localStorage on component mount
+  // FIXED: Better token validation and initialization
   useEffect(() => {
-    const storedToken = localStorage.getItem('token');
-    if (storedToken) {
-      setToken(storedToken);
-      loadTelegramData(storedToken);
-    }
+    const initializeAuth = async () => {
+      const storedToken = localStorage.getItem('token');
+      const storedUser = localStorage.getItem('user');
+      
+      if (storedToken) {
+        setToken(storedToken);
+        
+        // If we have a stored user, use it to update currentUser
+        if (storedUser) {
+          try {
+            const parsedUser = JSON.parse(storedUser);
+            setCurrentUser(parsedUser);
+            onUserUpdate(parsedUser);
+          } catch (e) {
+            console.error('Error parsing stored user:', e);
+          }
+        }
+        
+        // Load Telegram data
+        await loadTelegramData(storedToken);
+      } else {
+        // No token found, but don't immediately show session expired
+        // This allows the component to render properly for free users
+        console.log('No token found in localStorage');
+      }
+    };
+
+    initializeAuth();
   }, []);
 
   // Setup activity listeners
@@ -196,7 +220,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     };
   }, [updateActivityTime]);
 
-  // Telegram API functions
+  // FIXED: Improved Telegram data loading with better error handling
   const loadTelegramData = async (authToken: string) => {
     try {
       setIsLoadingTelegram(true);
@@ -240,19 +264,26 @@ export const Dashboard: React.FC<DashboardProps> = ({
       }
     } catch (error) {
       console.error('Error loading Telegram data:', error);
-      // If 401/403, session might be expired
+      // FIXED: Only show session expired for 401/403 errors
       if (axios.isAxiosError(error) && (error.response?.status === 401 || error.response?.status === 403)) {
-        setShowSessionExpired(true);
+        // Check if we have a valid token before showing session expired
+        const storedToken = localStorage.getItem('token');
+        if (storedToken) {
+          setShowSessionExpired(true);
+        }
       }
+      // For other errors (like network issues), just log them and continue
     } finally {
       setIsLoadingTelegram(false);
     }
   };
 
+  // FIXED: Improved user refresh with better error handling
   const refreshUser = async () => {
     const token = localStorage.getItem('token');
     if (!token) {
-      setShowSessionExpired(true);
+      // Don't show session expired if no token exists
+      // This is normal for free users
       return;
     }
 
@@ -264,15 +295,21 @@ export const Dashboard: React.FC<DashboardProps> = ({
       setCurrentUser(updatedUser);
       onUserUpdate(updatedUser);
       
+      // Store updated user in localStorage
+      localStorage.setItem('user', JSON.stringify(updatedUser));
+      
       // Refresh telegram data
       await loadTelegramData(token);
       
     } catch (err: any) {
       console.error('Failed to refresh user:', err);
       
-      // Check for 401 Unauthorized or 403 Forbidden
+      // FIXED: Only show session expired for 401/403 errors and when we have a token
       if (err.response?.status === 401 || err.response?.status === 403) {
-        setShowSessionExpired(true);
+        const storedToken = localStorage.getItem('token');
+        if (storedToken) {
+          setShowSessionExpired(true);
+        }
       }
     }
   };
@@ -282,9 +319,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
     const responseInterceptor = axios.interceptors.response.use(
       (response) => response,
       (error) => {
+        // FIXED: Only show session expired for 401/403 errors
         if (error.response?.status === 401 || error.response?.status === 403) {
-          // Session expired
-          setShowSessionExpired(true);
+          const storedToken = localStorage.getItem('token');
+          if (storedToken) {
+            setShowSessionExpired(true);
+          }
         }
         return Promise.reject(error);
       }
@@ -362,15 +402,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
     }
   };
 
-  // Check for session expiration periodically
+  // FIXED: Improved session checking logic
   useEffect(() => {
     const checkSession = () => {
       const token = localStorage.getItem('token');
       const tokenTimestamp = localStorage.getItem('token_timestamp');
       
       if (!token) {
-        // No token found, session expired
-        setShowSessionExpired(true);
+        // No token found, but don't show session expired
+        // This is normal for free users
         return;
       }
       
@@ -434,8 +474,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <div onClick={updateActivityTime}>
             <MarketSection user={currentUser} onUserUpdate={setCurrentUser} />
           </div>
-        );
-    }
+    )}
   };
 
   /* ------- Telegram Banner Component ----------------------------- */
@@ -469,7 +508,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <div className="text-xs text-gray-500 pl-4 space-y-1">
             <div className="flex items-center gap-1">
               <MessageSquare size={10} />
-              {/* FIX: Safely convert telegramId to string before using substring */}
               <span>ID: {String(telegramUser.telegramId || '').substring(0, 8)}...</span>
             </div>
             <div className="flex items-center gap-1">
@@ -530,13 +568,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
       >
         <div className="flex items-center justify-between p-6 border-b border-gray-200">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-lg flex items-center justify-center">
-              <div className="w-9 h-9 flex items-center justify-center text-white font-bold text-lg">
-                IX
-              </div>
+            <div className="w-8 h-8 bg-gradient-to-br from-white-600 to-indigo-600 rounded-lg flex items-center justify-center overflow-hidden">
+              <img 
+                src={Logo} 
+                alt="Trademino Logo" 
+                className="w-full h-full object-contain p-1"
+              />
             </div>
             <div>
-              <h1 className="font-bold text-xl text-gray-900">InsightX</h1>
+              <h1 className="font-bold text-xl text-gray-900">Trademino</h1>
               <p className="text-xs text-gray-500">Financial Dashboard</p>
             </div>
           </div>
@@ -738,8 +778,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <div className="absolute top-full right-0 mt-2 w-64 bg-white rounded-xl shadow-lg border border-gray-200 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
                   <div className="p-4 border-b border-gray-100">
                     <div className="flex items-center gap-3 mb-3">
-                      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center text-white font-medium text-lg">
-                        {user.name.charAt(0).toUpperCase()}
+                      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center overflow-hidden">
+                        <img 
+                          src={Logo} 
+                          alt="User Avatar" 
+                          className="w-full h-full object-contain p-2"
+                        />
                       </div>
                       <div>
                         <p className="font-medium text-gray-900">{user.name}</p>
@@ -815,7 +859,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <span className="text-sm text-gray-600">
                   Get market alerts on{' '}
                   <a 
-                    href="https://t.me/CryptoInsightProBot " 
+                    href="https://t.me/Trademinobot  " 
                     target="_blank" 
                     rel="noopener noreferrer"
                     className="text-blue-600 hover:underline font-medium"
@@ -834,7 +878,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               )}
             </div>
             <div className="text-sm text-gray-500">
-              © {new Date().getFullYear()} InsightX. All rights reserved.
+              © {new Date().getFullYear()} Tradmino. All rights reserved.
               {isPremium && telegramUser?.linked && telegramSettings.telegramNotifications && (
                 <span className="ml-2 text-green-600">⚡ Real-time alerts active</span>
               )}

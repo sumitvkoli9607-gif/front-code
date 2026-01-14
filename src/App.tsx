@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { BrowserRouter as Router } from "react-router-dom"; // Add this import
 import { Dashboard } from "./components/Dashboard";
 import { SignInPage } from "./components/SignInPage";
 
@@ -63,12 +64,16 @@ function App() {
 
   /* ---------- render ---------- */
   if (!user) return <SignInPage onSignIn={handleSignIn} />;
+  
+  // Wrap Dashboard with Router
   return (
-    <Dashboard
-      user={user}
-      onSignOut={handleSignOut}
-      onUserUpdate={handleUserUpdate} // ✅ pass setter
-    />
+    <Router>
+      <Dashboard
+        user={user}
+        onSignOut={handleSignOut}
+        onUserUpdate={handleUserUpdate}
+      />
+    </Router>
   );
 }
 

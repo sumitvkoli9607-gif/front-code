@@ -150,7 +150,7 @@ export default function PairAnalyzer() {
           {coin1Data && (
             <div className="mt-4 space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-2xl font-bold text-gray-900">${coin1Data.price.toLocaleString()}</span>
+                {/* <span className="text-2xl font-bold text-gray-900">${coin1Data.price.toLocaleString()}</span> */}
                 <div className="flex items-center gap-2">
                   {coin1Data.change24h >= 0 ? (
                     <TrendingUp className="w-5 h-5 text-green-500" />
@@ -185,7 +185,7 @@ export default function PairAnalyzer() {
           {coin2Data && (
             <div className="mt-4 space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-2xl font-bold text-gray-900">${coin2Data.price.toLocaleString()}</span>
+                {/* <span className="text-2xl font-bold text-gray-900">${coin2Data.price.toLocaleString()}</span> */}
                 <div className="flex items-center gap-2">
                   {coin2Data.change24h >= 0 ? (
                     <TrendingUp className="w-5 h-5 text-green-500" />

@@ -16,7 +16,6 @@ import {
   Layers,
   AlertCircle,
   PieChart,
-  Loader2,
 } from 'lucide-react';
 
 interface MarketOverview {

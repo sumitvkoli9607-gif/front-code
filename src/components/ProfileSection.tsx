@@ -17,7 +17,6 @@ import {
   Zap,
   Bot,
   Activity,
-  TestTube,
   Wifi,
   RefreshCw
 } from 'lucide-react';
@@ -46,7 +45,6 @@ export default function TelegramIntegration() {
   const [isLoading, setIsLoading] = useState(true);
   const [isLinking, setIsLinking] = useState(false);
   const [isUnlinking, setIsUnlinking] = useState(false);
-  const [isTesting, setIsTesting] = useState(false);
   const [isTestingConnection, setIsTestingConnection] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -60,7 +58,7 @@ export default function TelegramIntegration() {
   });
 
   const API_BASE = import.meta.env.VITE_API_URL || window.location.origin;
-  const BOT_USERNAME = '@TrademinoProBot';
+  const BOT_USERNAME = '@Trademinobot';
   const BOT_LINK = `https://t.me/${BOT_USERNAME.replace('@', '')}`;
 
   useEffect(() => {
@@ -331,51 +329,6 @@ export default function TelegramIntegration() {
     }
   };
 
-  const handleTestNotification = async () => {
-    setIsTesting(true);
-    setError('');
-    setSuccess('');
-
-    try {
-      const token = localStorage.getItem('token');
-      if (!token) throw new Error('No authentication token');
-
-      console.log('Sending test notification...');
-
-      const res = await fetch(`${API_BASE}/api/test/notification`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          type: 'TEST',
-          symbol: 'BTC/USDT'
-        })
-      });
-
-      const responseText = await res.text();
-      console.log('Test notification response:', res.status, responseText);
-
-      if (res.ok) {
-        setSuccess('✅ Test notification sent! Check your Telegram.');
-      } else {
-        let errorMessage = 'Failed to send test notification';
-        try {
-          const errorData = JSON.parse(responseText);
-          errorMessage = errorData.error || errorMessage;
-        } catch (e) {
-          errorMessage = responseText || errorMessage;
-        }
-        throw new Error(errorMessage);
-      }
-    } catch (err) {
-      console.error('Test notification error:', err);
-      setError(err instanceof Error ? err.message : 'Failed to send test notification');
-    } finally {
-      setIsTesting(false);
-    }
-  };
 
   const copyBotUsername = () => {
     navigator.clipboard.writeText(BOT_USERNAME);
@@ -736,14 +689,6 @@ export default function TelegramIntegration() {
                   <Bell className="w-5 h-5 mr-2 text-blue-600" />
                   Notification Settings
                 </h2>
-                <button
-                  onClick={handleTestNotification}
-                  disabled={isTesting || !settings.telegramNotifications}
-                  className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
-                >
-                  <TestTube className="w-4 h-4" />
-                  <span>{isTesting ? 'Sending...' : 'Send Test'}</span>
-                </button>
               </div>
               
               <div className="space-y-4">

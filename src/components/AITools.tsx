@@ -80,14 +80,6 @@ export default function AITools({ isDarkMode }: AIToolsProps) {
       stats: { pairs: 12, divergences: 3, correlation: '0.45' }
     },
     {
-      id: 'arbitrage' as AITool,
-      title: 'AI Arbitrage Finder',
-      description: 'Real-time cross-exchange arbitrage opportunities with fee calculations',
-      icon: Target,
-      color: 'pink',
-      stats: { exchanges: 8, opportunities: 5, profit: '0.5%' }
-    },
-    {
       id: 'options' as AITool,
       title: 'AI Options Flow Analyzer',
       description: 'Track unusual options activity and institutional positioning',

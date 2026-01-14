@@ -1,11 +1,32 @@
-// src/types/market.types.ts
+export interface Subscription {
+  plan: 'Free' | 'Enterprise';
+  subscriptionId?: string;
+  startDate?: string;
+  expiryDate?: string;
+  active: boolean;
+  paymentMethod?: string;
+}
+
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  avatar?: string;
+  subscription: Subscription;
+  availableBalance?: number;
+  totalWithdrawn?: number;
+  pendingWithdrawals?: number;
+}
+
 export interface MarketData {
   symbol: string;
-  price: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
   change: number;
   volume: number;
-  category: 'crypto' | 'forex' | 'stocks';
-  description?: string;
+  category: string;
   timestamp: number;
 }
 
@@ -20,6 +41,13 @@ export interface MarketSentiment {
   bullish: number;
   bearish: number;
   neutral: number;
+  dominance: 'bullish' | 'bearish' | 'neutral';
+  strength: number;
+  trend: string;
+  confidence: number;
+  priceChange: number;
+  volume: number;
+  timeframe: string;
 }
 
 export interface MarketPsychology {
@@ -27,6 +55,9 @@ export interface MarketPsychology {
   greed: number;
   momentum: number;
   volatility: number;
+  sentimentDominance: string;
+  sentimentStrength: number;
+  priceAcceleration: number;
 }
 
 export interface SupportResistanceLevel {
@@ -34,120 +65,141 @@ export interface SupportResistanceLevel {
   strength: number;
   description: string;
   type: string;
+  clusterSize?: number;
 }
 
 export interface SupportResistance {
   supports: SupportResistanceLevel[];
   resistances: SupportResistanceLevel[];
-  currentLevel: 'support' | 'resistance' | 'neutral';
-  breakoutDirection: 'up' | 'down' | 'sideways';
+  currentLevel: string;
+  breakoutDirection: string;
   breakoutProbability: number;
-  recommendedAction: 'buy' | 'sell' | 'hold' | 'wait';
+  recommendedAction: string;
   confidence: number;
   pivotPoint: number;
   recentHigh: number;
   recentLow: number;
 }
 
+export interface TradeSetup {
+  signal: string;
+  confidence: number;
+  entryZones: number[];
+  stopLoss: number;
+  takeProfit: number;
+  positionSize: string;
+  rewardRiskRatio: number;
+  reasons?: string[];
+  probabilityFactors?: Record<string, unknown>;
+}
+
 export interface MarketOverview {
-  signalData: any;
-  multiTimeframeAnalysis: any;
   symbol: string;
   currentPrice: number;
   priceChange24h: number;
   
-  // Essential Trading Information
-  tradeSetup: {
-    reasons: any;
-    probabilityFactors: any;
-    signal: 'BUY' | 'SELL' | 'BUY_BREAKOUT' | 'RANGE_BOUND' | 'HOLD';
-    confidence: number;
-    entryZones: number[];
-    stopLoss: number;
-    takeProfit: number;
-    positionSize: string;
-    rewardRiskRatio: number;
+  // Breakout detection
+  breakouts?: {
+    detected: boolean;
+    breakouts: any[];
+    count: number;
   };
   
+  // RSI analysis
+  rsi?: {
+    value: number;
+    analysis: any;
+    signal: string;
+  };
+  
+  tradeSetup: TradeSetup;
+  
   keyLevels: {
-    strongestSupport: number;
-    strongestResistance: number;
     immediateSupport: number;
     immediateResistance: number;
     nextMajorSupport: number;
     nextMajorResistance: number;
     breakoutLevel: number;
+    strongestSupport: number;
+    strongestResistance: number;
   };
   
   momentum: {
-    divergence: boolean;
-    direction: 'bullish' | 'bearish' | 'neutral';
+    direction: string;
     strength: number;
-    acceleration: 'increasing' | 'decreasing' | 'stable' | 'volatile' | 'unstable_increase';
+    acceleration: string;
     rsi: number;
+    divergence: any[];
   };
   
   riskMetrics: {
-    winProbability: number;
-    volatility: 'low' | 'medium' | 'high';
+    volatility: string;
     atr: number;
     maxRiskPerTrade: string;
     rewardRiskRatio: number;
+    winProbability: number;
   };
   
   volume: {
-    volumeProfile: boolean;
-    status: 'normal' | 'accumulation' | 'strong_accumulation' | 'distribution';
+    status: string;
     relativeVolume: number;
     volumeSpike: boolean;
+    volumeProfile: any[];
   };
   
   marketStructure: {
+    trend: string;
+    phase: string;
+    bias: string;
     structure: any;
-    trend: 'uptrend' | 'downtrend' | 'sideways';
-    phase: 'bullish_momentum' | 'bearish_momentum' | 'consolidation' | 'volatile' | 'neutral';
-    bias: 'bullish' | 'bearish' | 'neutral';
   };
   
-  priceAction: {
-    pattern: string;
-    candles: 'bullish' | 'bearish' | 'neutral';
-    rejection: boolean;
-  };
-  
+  multiTimeframeAnalysis: any;
   timeframeAlignment: string;
   summary: string;
   timestamp: number;
+  signalData: any;
+  notificationTriggers?: any[];
 }
 
-export interface User {
-  id: string;
-  name: string;
-  email: string;
-  avatar: string;
-  subscription?: {
-    plan: string;
-    active: boolean;
-    startDate?: string;
-    expiryDate?: string;
-    subscriptionId?: string;
-  };
-}
+export type Timeframe = '15m' | '30m' | '1h' | '3h' | '6h' | '12h' | '24h';
 
-export interface MarketSectionProps {
-  user: User;
-  onUserUpdate: (user: User) => void;
-}
-
-export const TIMEFRAMES =  ['15m', '30m', '1h', '3h', '6h', '12h', '24h'] as const;
-export type Timeframe = typeof TIMEFRAMES[number];
+export const TIMEFRAMES: Timeframe[] = ['15m', '30m', '1h', '3h', '6h', '12h', '24h'];
 
 export const PLAN_CURRENCIES = {
   Free: ['BTC/USDT', 'ETH/USDT', 'XRP/USDT', 'LTC/USDT', 'DOGE/USDT'],
-  Enterprise: 'all'
+  Enterprise: 'all' as const,
 };
 
 export const FREE_TIER_ACCESS = {
-  timeframes: ['12h', '24h'],
-  endpoints: ['rate', 'sentiment', 'psychology', 'overview', 'support-resistance']
+  timeframes: ['12h', '24h'] as Timeframe[],
+  endpoints: ['rate', 'sentiment', 'psychology','support-resistance'] as string[],
 };
+
+export interface MarketSectionProps {
+  user: User | null;
+  onUserUpdate: (user: User) => void;
+}
+
+export interface MarketCardProps {
+  market: MarketData;
+  onClick: () => void;
+}
+
+export interface PsychologyIndicatorProps {
+  label: string;
+  value: number;
+  icon: React.ReactNode;
+  color: 'red' | 'green' | 'blue' | 'purple';
+}
+
+export interface SupportResistanceCardProps {
+  srData: SupportResistance;
+  currentPrice: number;
+  selectedAsset: MarketData;
+}
+
+export interface TraderOverviewProps {
+  overview: MarketOverview | null;
+  loading: boolean;
+}
