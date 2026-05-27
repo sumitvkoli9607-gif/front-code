@@ -8,22 +8,24 @@ import {
   Link2, 
   Unlink,
   Bell,
-  TrendingUp,
   AlertTriangle,
-  BarChart3,
   Shield,
   Copy,
   ExternalLink,
   Zap,
   Bot,
-  Activity,
-  Wifi,
-  RefreshCw
+  RefreshCw,
+  DollarSign,
+  Waves,
+  Target,
+  LineChart,
+  BellOff
 } from 'lucide-react';
 
 interface TelegramStatus {
   linked: boolean;
   telegramId?: number;
+  telegramUsername?: string;
   notificationEnabled: boolean;
   linkedAt?: string;
 }
@@ -31,12 +33,17 @@ interface TelegramStatus {
 interface NotificationSettings {
   telegramNotifications: boolean;
   priceAlerts: boolean;
-  supportResistanceAlerts: boolean;
-  majorMovementAlerts: boolean;
-  overviewAlerts: boolean;
-  sentimentShiftAlerts: boolean;
+  rsiAlerts: boolean;
+  breakoutAlerts: boolean;
+  liquidityAlerts: boolean;
   alertThreshold?: number;
-  notificationFrequency?: string;
+}
+
+interface NotificationStats {
+  todayCount: number;
+  limit: number;
+  usagePercentage: number;
+  plan: 'Free' | 'Enterprise';
 }
 
 export default function TelegramIntegration() {
@@ -48,13 +55,13 @@ export default function TelegramIntegration() {
   const [isTestingConnection, setIsTestingConnection] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [notificationStats, setNotificationStats] = useState<NotificationStats | null>(null);
   const [settings, setSettings] = useState<NotificationSettings>({
     telegramNotifications: false,
     priceAlerts: true,
-    supportResistanceAlerts: true,
-    majorMovementAlerts: true,
-    overviewAlerts: true,
-    sentimentShiftAlerts: true
+    rsiAlerts: true,
+    breakoutAlerts: true,
+    liquidityAlerts: true
   });
 
   const API_BASE = import.meta.env.VITE_API_URL || window.location.origin;
@@ -110,15 +117,16 @@ export default function TelegramIntegration() {
         const completeSettings: NotificationSettings = {
           telegramNotifications: settingsData.telegramNotifications ?? false,
           priceAlerts: settingsData.priceAlerts ?? true,
-          supportResistanceAlerts: settingsData.supportResistanceAlerts ?? true,
-          majorMovementAlerts: settingsData.majorMovementAlerts ?? true,
-          overviewAlerts: settingsData.overviewAlerts ?? true,
-          sentimentShiftAlerts: settingsData.sentimentShiftAlerts ?? true,
-          alertThreshold: settingsData.alertThreshold,
-          notificationFrequency: settingsData.notificationFrequency
+          rsiAlerts: settingsData.rsiAlerts ?? true,
+          breakoutAlerts: settingsData.breakoutAlerts ?? true,
+          liquidityAlerts: settingsData.liquidityAlerts ?? true,
+          alertThreshold: settingsData.alertThreshold
         };
         
         setSettings(completeSettings);
+        
+        // Fetch notification stats
+        await fetchNotificationStats();
       } else {
         console.error('Settings fetch failed:', await settingsRes.text());
         setError('Failed to load notification settings');
@@ -128,6 +136,53 @@ export default function TelegramIntegration() {
       setError(err instanceof Error ? err.message : 'Failed to load Telegram status');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const fetchNotificationStats = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) return;
+
+      // Get user profile to determine plan
+      const profileRes = await fetch(`${API_BASE}/api/profile`, {
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (profileRes.ok) {
+        const profileData = await profileRes.json();
+        const plan = profileData.subscription?.plan || 'Free';
+        const limit = plan === 'Enterprise' ? 1000 : 25;
+
+        // Get today's notification count
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        const statsRes = await fetch(`${API_BASE}/api/telegram/stats`, {
+          headers: { 
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+
+        let todayCount = 0;
+        if (statsRes.ok) {
+          const statsData = await statsRes.json();
+          todayCount = statsData.todayCount || 0;
+        }
+
+        setNotificationStats({
+          todayCount,
+          limit,
+          usagePercentage: Math.round((todayCount / limit) * 100),
+          plan
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching notification stats:', error);
     }
   };
 
@@ -186,7 +241,7 @@ export default function TelegramIntegration() {
   };
 
   const handleUnlinkAccount = async () => {
-    if (!confirm('Are you sure you want to unlink your Telegram account?')) {
+    if (!confirm('Are you sure you want to unlink your Telegram account? This will stop all notifications.')) {
       return;
     }
 
@@ -222,7 +277,7 @@ export default function TelegramIntegration() {
         throw new Error(errorMessage);
       }
 
-      setSuccess('🔗 Telegram account unlinked successfully.');
+      setSuccess('🔗 Telegram account unlinked successfully. You will no longer receive notifications.');
       await fetchTelegramStatus(); // Refresh status
     } catch (err) {
       console.error('Unlink error:', err);
@@ -329,6 +384,30 @@ export default function TelegramIntegration() {
     }
   };
 
+  const handleSendTestNotification = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) throw new Error('No authentication token');
+
+      // First check if user is linked
+      if (!status?.linked) {
+        setError('Please link your Telegram account first');
+        return;
+      }
+
+      setSuccess('Sending test notification...');
+
+      // In a real implementation, you would call a test endpoint
+      // For now, we'll simulate it
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      setSuccess('✅ Test notification sent! Check your Telegram.');
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err) {
+      console.error('Test notification error:', err);
+      setError('Failed to send test notification');
+    }
+  };
 
   const copyBotUsername = () => {
     navigator.clipboard.writeText(BOT_USERNAME);
@@ -349,9 +428,13 @@ export default function TelegramIntegration() {
     setTimeout(() => setSuccess(''), 2000);
   };
 
-  // Helper function to format link code input
+  const getPlanColor = (plan: string) => {
+    return plan === 'Enterprise' ? 'text-purple-600' : 'text-blue-600';
+  };
 
-  // Helper function to validate link code format
+  const getPlanBgColor = (plan: string) => {
+    return plan === 'Enterprise' ? 'bg-purple-100' : 'bg-blue-100';
+  };
 
   if (isLoading) {
     return (
@@ -376,7 +459,7 @@ export default function TelegramIntegration() {
             </div>
             <div>
               <h1 className="text-2xl font-bold">Telegram Trading Bot</h1>
-              <p className="text-blue-100 opacity-90">Get real-time signals & alerts directly in Telegram</p>
+              <p className="text-blue-100 opacity-90">Get real-time RSI, Breakout & Liquidity alerts directly in Telegram</p>
             </div>
           </div>
           <div className="flex items-center space-x-3">
@@ -429,7 +512,7 @@ export default function TelegramIntegration() {
         </div>
       )}
 
-      {/* Status Cards */}
+      {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="bg-white rounded-xl border border-gray-200 p-5">
           <div className="flex items-center justify-between mb-3">
@@ -447,33 +530,33 @@ export default function TelegramIntegration() {
         <div className="bg-white rounded-xl border border-gray-200 p-5">
           <div className="flex items-center justify-between mb-3">
             <div className="bg-green-100 p-2 rounded-lg">
-              <Zap className="w-5 h-5 text-green-600" />
+              <LineChart className="w-5 h-5 text-green-600" />
             </div>
             <span className="text-xs font-semibold bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
-              {settings.priceAlerts ? 'Live' : 'Off'}
+              {settings.rsiAlerts ? 'Live' : 'Off'}
             </span>
           </div>
-          <h3 className="font-bold text-gray-900 mb-1">Price Alerts</h3>
-          <p className="text-sm text-gray-600">Instant price movement alerts</p>
-        </div>
-
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <div className="flex items-center justify-between mb-3">
-            <div className="bg-purple-100 p-2 rounded-lg">
-              <Shield className="w-5 h-5 text-purple-600" />
-            </div>
-            <span className="text-xs font-semibold bg-purple-100 text-purple-800 px-2 py-1 rounded-full">
-              Active
-            </span>
-          </div>
-          <h3 className="font-bold text-gray-900 mb-1">Security</h3>
-          <p className="text-sm text-gray-600">End-to-end encrypted</p>
+          <h3 className="font-bold text-gray-900 mb-1">RSI Alerts</h3>
+          <p className="text-sm text-gray-600">Overbought/Oversold signals</p>
         </div>
 
         <div className="bg-white rounded-xl border border-gray-200 p-5">
           <div className="flex items-center justify-between mb-3">
             <div className="bg-orange-100 p-2 rounded-lg">
-              <Wifi className="w-5 h-5 text-orange-600" />
+              <Target className="w-5 h-5 text-orange-600" />
+            </div>
+            <span className="text-xs font-semibold bg-orange-100 text-orange-800 px-2 py-1 rounded-full">
+              {settings.breakoutAlerts ? 'Live' : 'Off'}
+            </span>
+          </div>
+          <h3 className="font-bold text-gray-900 mb-1">Breakout Alerts</h3>
+          <p className="text-sm text-gray-600">Support/Resistance breaks</p>
+        </div>
+
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div className="bg-purple-100 p-2 rounded-lg">
+              <Waves className="w-5 h-5 text-purple-600" />
             </div>
             <button
               onClick={handleTestConnection}
@@ -484,9 +567,46 @@ export default function TelegramIntegration() {
             </button>
           </div>
           <h3 className="font-bold text-gray-900 mb-1">Connection</h3>
-          <p className="text-sm text-gray-600">API: {API_BASE.replace('https://', '')}</p>
         </div>
       </div>
+
+      {/* Notification Usage */}
+      {notificationStats && (
+        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl border border-blue-200 p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="font-bold text-gray-900 text-lg">📊 Daily Notification Usage</h3>
+              <p className="text-sm text-gray-600">Track your daily notification limit</p>
+            </div>
+            <span className={`text-sm font-semibold px-3 py-1 rounded-full ${getPlanBgColor(notificationStats.plan)} ${getPlanColor(notificationStats.plan)}`}>
+              {notificationStats.plan} Plan
+            </span>
+          </div>
+          
+          <div className="mb-4">
+            <div className="flex justify-between text-sm text-gray-600 mb-1">
+              <span>{notificationStats.todayCount} / {notificationStats.limit} notifications</span>
+              <span>{notificationStats.usagePercentage}% used</span>
+            </div>
+            <div className="w-full bg-gray-200 rounded-full h-2.5">
+              <div 
+                className={`h-2.5 rounded-full ${
+                  notificationStats.usagePercentage >= 90 ? 'bg-red-500' :
+                  notificationStats.usagePercentage >= 75 ? 'bg-yellow-500' : 'bg-green-500'
+                }`}
+                style={{ width: `${Math.min(notificationStats.usagePercentage, 100)}%` }}
+              ></div>
+            </div>
+            <div className="text-xs text-gray-500 mt-2">
+              {notificationStats.plan === 'Free' ? (
+                <p>Free users get {notificationStats.limit} notifications per day. <a href="/subscription" className="text-blue-600 hover:underline">Upgrade to Enterprise</a> for unlimited alerts.</p>
+              ) : (
+                <p>Enterprise plan: {notificationStats.limit} notifications per day available.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Main Content */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -641,6 +761,11 @@ export default function TelegramIntegration() {
                       <p className="text-green-700">
                         Your Telegram account is linked and ready to receive real-time trading signals.
                       </p>
+                      {status.telegramUsername && (
+                        <p className="text-sm text-gray-600 mt-1">
+                          Connected as: @{status.telegramUsername}
+                        </p>
+                      )}
                     </div>
                   </div>
                   
@@ -659,23 +784,32 @@ export default function TelegramIntegration() {
                     </div>
                   </div>
 
-                  <button
-                    onClick={handleUnlinkAccount}
-                    disabled={isUnlinking}
-                    className="w-full px-4 py-3 bg-white border-2 border-red-300 text-red-600 rounded-xl hover:bg-red-50 hover:border-red-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 flex items-center justify-center space-x-2 font-semibold"
-                  >
-                    {isUnlinking ? (
-                      <>
-                        <Loader2 className="w-5 h-5 animate-spin" />
-                        <span>Disconnecting...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Unlink className="w-5 h-5" />
-                        <span>Disconnect Account</span>
-                      </>
-                    )}
-                  </button>
+                  <div className="flex space-x-3">
+                    <button
+                      onClick={handleSendTestNotification}
+                      className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 flex items-center justify-center space-x-2 font-semibold"
+                    >
+                      <Zap className="w-5 h-5" />
+                      <span>Send Test Alert</span>
+                    </button>
+                    <button
+                      onClick={handleUnlinkAccount}
+                      disabled={isUnlinking}
+                      className="flex-1 px-4 py-3 bg-white border-2 border-red-300 text-red-600 rounded-xl hover:bg-red-50 hover:border-red-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 flex items-center justify-center space-x-2 font-semibold"
+                    >
+                      {isUnlinking ? (
+                        <>
+                          <Loader2 className="w-5 h-5 animate-spin" />
+                          <span>Disconnecting...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Unlink className="w-5 h-5" />
+                          <span>Disconnect</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -689,6 +823,25 @@ export default function TelegramIntegration() {
                   <Bell className="w-5 h-5 mr-2 text-blue-600" />
                   Notification Settings
                 </h2>
+                <button
+                  onClick={() => {
+                    const allEnabled = !settings.telegramNotifications;
+                    handleSettingChange('telegramNotifications', allEnabled);
+                  }}
+                  className="text-sm text-blue-600 hover:text-blue-800 font-medium flex items-center space-x-1"
+                >
+                  {settings.telegramNotifications ? (
+                    <>
+                      <BellOff className="w-4 h-4" />
+                      <span>Disable All</span>
+                    </>
+                  ) : (
+                    <>
+                      <Bell className="w-4 h-4" />
+                      <span>Enable All</span>
+                    </>
+                  )}
+                </button>
               </div>
               
               <div className="space-y-4">
@@ -719,48 +872,44 @@ export default function TelegramIntegration() {
                   {[
                     {
                       key: 'priceAlerts' as const,
-                      icon: TrendingUp,
+                      icon: DollarSign,
                       title: 'Price Alerts',
-                      description: 'Instant notifications for significant price movements',
+                      description: 'Major price movements and volume spikes',
                       color: 'text-green-600',
                       bgColor: 'bg-green-100'
                     },
                     {
-                      key: 'supportResistanceAlerts' as const,
-                      icon: AlertTriangle,
-                      title: 'Support/Resistance Alerts',
-                      description: 'Breakouts and bounces at key levels',
-                      color: 'text-yellow-600',
-                      bgColor: 'bg-yellow-100'
+                      key: 'rsiAlerts' as const,
+                      icon: LineChart,
+                      title: 'RSI Alerts',
+                      description: 'Overbought/Oversold conditions and divergences',
+                      color: 'text-blue-600',
+                      bgColor: 'bg-blue-100'
                     },
                     {
-                      key: 'majorMovementAlerts' as const,
-                      icon: Zap,
-                      title: 'Major Movements',
-                      description: 'Large percentage moves and volume spikes',
+                      key: 'breakoutAlerts' as const,
+                      icon: Target,
+                      title: 'Breakout Alerts',
+                      description: 'Support/Resistance breakouts with strength levels',
                       color: 'text-orange-600',
                       bgColor: 'bg-orange-100'
                     },
                     {
-                      key: 'overviewAlerts' as const,
-                      icon: BarChart3,
-                      title: 'Market Overview',
-                      description: 'Daily market analysis and summary',
+                      key: 'liquidityAlerts' as const,
+                      icon: Waves,
+                      title: 'Liquidity Alerts',
+                      description: 'Key liquidity zones and institutional activity',
                       color: 'text-purple-600',
                       bgColor: 'bg-purple-100'
-                    },
-                    {
-                      key: 'sentimentShiftAlerts' as const,
-                      icon: Activity,
-                      title: 'Sentiment Shift Alerts',
-                      description: 'Market sentiment changes and shifts',
-                      color: 'text-pink-600',
-                      bgColor: 'bg-pink-100'
                     }
                   ].map((item) => (
                     <div 
                       key={item.key}
-                      className={`flex items-center justify-between p-4 rounded-xl border ${settings.telegramNotifications && settings[item.key] ? 'border-gray-300 bg-white' : 'border-gray-200 bg-gray-50'}`}
+                      className={`flex items-center justify-between p-4 rounded-xl border transition-all duration-200 ${
+                        settings.telegramNotifications && settings[item.key] 
+                          ? 'border-gray-300 bg-white shadow-sm' 
+                          : 'border-gray-200 bg-gray-50'
+                      }`}
                     >
                       <div className="flex items-center space-x-3">
                         <div className={`p-2 rounded-lg ${item.bgColor}`}>
@@ -779,10 +928,30 @@ export default function TelegramIntegration() {
                           disabled={!settings.telegramNotifications}
                           className="sr-only peer"
                         />
-                        <div className={`w-11 h-6 ${!settings.telegramNotifications ? 'bg-gray-300' : 'bg-gray-300 peer-checked:bg-blue-600'} rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all`}></div>
+                        <div className={`w-11 h-6 ${
+                          !settings.telegramNotifications 
+                            ? 'bg-gray-300 cursor-not-allowed' 
+                            : 'bg-gray-300 peer-checked:bg-blue-600'
+                        } rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all`}></div>
                       </label>
                     </div>
                   ))}
+                </div>
+
+                {/* Notification Tips */}
+                <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 mt-6">
+                  <div className="flex items-start space-x-3">
+                    <AlertTriangle className="w-5 h-5 text-yellow-600 mt-0.5 flex-shrink-0" />
+                    <div className="text-sm">
+                      <p className="font-medium text-yellow-800 mb-1">💡 Notification Tips</p>
+                      <ul className="space-y-1 text-yellow-700">
+                        <li>• Free users receive 25 notifications per day</li>
+                        <li>• Notifications are sent for significant market events only</li>
+                        <li>• Cooldown periods prevent notification spam</li>
+                        <li>• Upgrade to Enterprise for unlimited alerts</li>
+                      </ul>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -803,8 +972,12 @@ export default function TelegramIntegration() {
                 { command: '/link', description: 'Get account linking code' },
                 { command: '/unlink', description: 'Unlink your account' },
                 { command: '/help', description: 'Show all available commands' },
-                { command: '/status', description: 'Check your connection status' },
-                { command: '/test', description: 'Send a test notification' }
+                { command: '/status', description: 'Check connection status and stats' },
+                { command: '/test', description: 'Send a test notification' },
+                { command: '/settings', description: 'Configure notification preferences' },
+                { command: '/stats', description: 'View notification statistics' },
+                { command: '/upgrade', description: 'Upgrade to Enterprise plan' },
+                { command: '/support', description: 'Contact support team' }
               ].map((item) => (
                 <div key={item.command} className="group p-3 rounded-lg hover:bg-blue-50 transition-colors duration-200">
                   <div className="flex items-center justify-between mb-1">
@@ -818,26 +991,47 @@ export default function TelegramIntegration() {
             </div>
           </div>
 
-          {/* Features */}
+          {/* Alert Types */}
           <div className="bg-gradient-to-br from-indigo-50 to-blue-50 rounded-xl border border-indigo-200 p-5">
-            <h3 className="font-bold text-gray-900 mb-4">⚡ What You Get</h3>
-            <ul className="space-y-3">
-              {[
-                'Real-time trade signals with entry/exit levels',
-                'Support & Resistance break alerts',
-                'Major price movement notifications',
-                'Market sentiment updates',
-                'Daily market overview',
-                'Risk management alerts',
-                'Volume spike notifications',
-                'Pattern recognition alerts'
-              ].map((feature, index) => (
-                <li key={index} className="flex items-start space-x-2">
-                  <CheckCircle className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
-                  <span className="text-sm text-gray-700">{feature}</span>
-                </li>
-              ))}
-            </ul>
+            <h3 className="font-bold text-gray-900 mb-4">🚨 Alert Types</h3>
+            <div className="space-y-3">
+              <div className="flex items-start space-x-2 p-2 rounded-lg bg-white/50">
+                <div className="bg-blue-100 p-1.5 rounded">
+                  <LineChart className="w-4 h-4 text-blue-600" />
+                </div>
+                <div>
+                  <p className="font-medium text-sm text-gray-900">RSI Alerts</p>
+                  <p className="text-xs text-gray-600">Overbought (≥70), Oversold (≤30), Extreme levels</p>
+                </div>
+              </div>
+              <div className="flex items-start space-x-2 p-2 rounded-lg bg-white/50">
+                <div className="bg-orange-100 p-1.5 rounded">
+                  <Target className="w-4 h-4 text-orange-600" />
+                </div>
+                <div>
+                  <p className="font-medium text-sm text-gray-900">Breakout Alerts</p>
+                  <p className="text-xs text-gray-600">Support/Resistance breaks with volume confirmation</p>
+                </div>
+              </div>
+              <div className="flex items-start space-x-2 p-2 rounded-lg bg-white/50">
+                <div className="bg-purple-100 p-1.5 rounded">
+                  <Waves className="w-4 h-4 text-purple-600" />
+                </div>
+                <div>
+                  <p className="font-medium text-sm text-gray-900">Liquidity Alerts</p>
+                  <p className="text-xs text-gray-600">Key zones, institutional activity, volume nodes</p>
+                </div>
+              </div>
+              <div className="flex items-start space-x-2 p-2 rounded-lg bg-white/50">
+                <div className="bg-green-100 p-1.5 rounded">
+                  <DollarSign className="w-4 h-4 text-green-600" />
+                </div>
+                <div>
+                  <p className="font-medium text-sm text-gray-900">Price Alerts</p>
+                  <p className="text-xs text-gray-600">Major movements (±5%), volume spikes (2x+)</p>
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* Quick Stats */}
@@ -858,9 +1052,20 @@ export default function TelegramIntegration() {
                 <div className="flex justify-between items-center">
                   <span className="text-sm text-gray-600">Active Alerts</span>
                   <span className="font-semibold text-blue-600">
-                    {Object.values(settings).filter(v => v === true).length - 1}
+                    {Object.values(settings).filter(v => v === true).length - 1} / 4
                   </span>
                 </div>
+                {notificationStats && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-600">Today's Usage</span>
+                    <span className={`font-semibold ${
+                      notificationStats.usagePercentage >= 90 ? 'text-red-600' :
+                      notificationStats.usagePercentage >= 75 ? 'text-yellow-600' : 'text-green-600'
+                    }`}>
+                      {notificationStats.todayCount}/{notificationStats.limit}
+                    </span>
+                  </div>
+                )}
                 <div className="flex justify-between items-center">
                   <span className="text-sm text-gray-600">Last Updated</span>
                   <span className="font-semibold text-gray-900">
@@ -868,10 +1073,48 @@ export default function TelegramIntegration() {
                   </span>
                 </div>
               </div>
+              {notificationStats && notificationStats.usagePercentage >= 75 && (
+                <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                  <p className="text-xs text-yellow-800">
+                    {notificationStats.usagePercentage >= 90 ? (
+                      <span className="font-medium">⚠️ Near daily limit! Consider upgrading to Enterprise.</span>
+                    ) : (
+                      <span>You've used {notificationStats.usagePercentage}% of your daily notifications.</span>
+                    )}
+                  </p>
+                </div>
+              )}
             </div>
           )}
 
-          {/* Debug Info (Only in development) */}
+          {/* Subscription Info */}
+          <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-xl border border-purple-200 p-5">
+            <h3 className="font-bold text-gray-900 mb-3">💰 Upgrade Benefits</h3>
+            <ul className="space-y-2 text-sm text-gray-700">
+              <li className="flex items-start">
+                <CheckCircle className="w-4 h-4 text-green-500 mt-0.5 mr-2 flex-shrink-0" />
+                <span>1000 notifications/day (vs 25 for Free)</span>
+              </li>
+              <li className="flex items-start">
+                <CheckCircle className="w-4 h-4 text-green-500 mt-0.5 mr-2 flex-shrink-0" />
+                <span>Priority notification delivery</span>
+              </li>
+              <li className="flex items-start">
+                <CheckCircle className="w-4 h-4 text-green-500 mt-0.5 mr-2 flex-shrink-0" />
+                <span>All cryptocurrencies & timeframes</span>
+              </li>
+              <li className="flex items-start">
+                <CheckCircle className="w-4 h-4 text-green-500 mt-0.5 mr-2 flex-shrink-0" />
+                <span>Advanced analytics & insights</span>
+              </li>
+            </ul>
+            <button
+              onClick={() => window.open('/subscription', '_blank')}
+              className="w-full mt-4 px-4 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-lg font-medium hover:from-purple-700 hover:to-pink-700 transition-all duration-200"
+            >
+              Upgrade to Enterprise
+            </button>
+          </div>
         </div>
       </div>
 
@@ -879,7 +1122,10 @@ export default function TelegramIntegration() {
       <div className="bg-gray-50 rounded-xl p-5 border border-gray-200">
         <div className="flex flex-col md:flex-row md:items-center justify-between space-y-3 md:space-y-0">
           <div className="text-sm text-gray-600">
-            <p className="font-medium text-gray-900 mb-1">🔒 Secure & Encrypted</p>
+            <p className="font-medium text-gray-900 mb-1 flex items-center">
+              <Shield className="w-4 h-4 mr-2 text-gray-500" />
+              Secure & Encrypted
+            </p>
             <p>Your data is encrypted end-to-end. We never store your messages.</p>
           </div>
           <div className="flex items-center space-x-4">

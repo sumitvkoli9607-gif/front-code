@@ -86,6 +86,11 @@ export const MarketSection: React.FC<MarketSectionProps> = ({ user, onUserUpdate
   const isPremium = user?.subscription?.active && user.subscription.plan !== 'Free';
   const isFreeTier = !isPremium;
 
+  // Check if user has access to overview feature
+  const hasAccessToOverview = () => {
+    return isPremium;
+  };
+
   const refreshUser = async () => {
     const token = localStorage.getItem('token');
     if (!token) return;
@@ -241,9 +246,6 @@ export const MarketSection: React.FC<MarketSectionProps> = ({ user, onUserUpdate
         : 'An unexpected error occurred';
       setError(prev => ({ ...prev, assetData: message }));
       console.error('Asset data fetch error:', err);
-      if (axios.isAxiosError(err) && err.response?.status === 403) {
-        setShowSubscriptionModal(true);
-      }
     } finally {
       setLoading(prev => ({ ...prev, assetData: false }));
     }
@@ -251,6 +253,12 @@ export const MarketSection: React.FC<MarketSectionProps> = ({ user, onUserUpdate
 
   const fetchMarketOverview = useCallback(async () => {
     if (!selectedAsset) return;
+
+    // Check if user has access before making the API call
+    if (!hasAccessToOverview()) {
+      setShowSubscriptionModal(true);
+      return;
+    }
 
     try {
       setLoading(prev => ({ ...prev, overview: true }));
@@ -284,6 +292,7 @@ export const MarketSection: React.FC<MarketSectionProps> = ({ user, onUserUpdate
         : 'An unexpected error occurred';
       setError(prev => ({ ...prev, overview: message }));
       console.error('Market overview fetch error:', err);
+      // If it's a 403 error (forbidden), show subscription modal
       if (axios.isAxiosError(err) && err.response?.status === 403) {
         setShowSubscriptionModal(true);
       }
@@ -291,6 +300,14 @@ export const MarketSection: React.FC<MarketSectionProps> = ({ user, onUserUpdate
       setLoading(prev => ({ ...prev, overview: false }));
     }
   }, [selectedAsset]);
+
+  const handleViewOverview = () => {
+    if (!hasAccessToOverview()) {
+      setShowSubscriptionModal(true);
+    } else {
+      fetchMarketOverview();
+    }
+  };
 
   useEffect(() => {
     fetchMarkets(selectedTimeframe);
@@ -600,13 +617,7 @@ export const MarketSection: React.FC<MarketSectionProps> = ({ user, onUserUpdate
               {hasAccessToCurrency(selectedAsset.symbol) && (
                 <div className="flex items-center gap-4">
                   <button
-                    onClick={() => {
-                      if (showOverview) {
-                        setShowOverview(false);
-                      } else {
-                        fetchMarketOverview();
-                      }
-                    }}
+                    onClick={handleViewOverview}
                     className="flex items-center gap-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-6 py-3 rounded-lg hover:from-indigo-700 hover:to-purple-700 transition-all shadow-lg hover:shadow-xl text-base font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                     disabled={loading.overview}
                   >
@@ -645,7 +656,25 @@ export const MarketSection: React.FC<MarketSectionProps> = ({ user, onUserUpdate
 
             {/* Show either trader overview or regular analysis */}
             {showOverview ? (
-              <TraderOverview overview={overview} loading={loading.overview} />
+              hasAccessToOverview() ? (
+                <TraderOverview overview={overview} loading={loading.overview} />
+              ) : (
+                <div className="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-xl p-8 text-center">
+                  <div className="flex items-center justify-center gap-3 mb-4">
+                    <Lock size={32} className="text-blue-600" />
+                    <h3 className="text-xl font-semibold text-gray-900">Upgrade to Access Trader Overview</h3>
+                  </div>
+                  <p className="text-gray-600 mb-6">
+                    The Trader Overview feature is only available for Enterprise plan subscribers. Upgrade now to get access to advanced trading insights, breakout detection, RSI analysis, and comprehensive market structure analysis.
+                  </p>
+                  <button
+                    onClick={handleUpgradeClick}
+                    className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-8 py-3 rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all shadow-lg hover:shadow-xl text-base font-medium"
+                  >
+                    Upgrade to Enterprise
+                  </button>
+                </div>
+              )
             ) : (
               <div>
                 {/* Asset Header */}

@@ -25,7 +25,7 @@ import PairAnalyzer from './PairAnalyzer';
 import axios from 'axios';
 
 // Import the NotificationSystem component
-import NotificationSystem from './Notifications';
+// import NotificationSystem from './Notifications';
 
 /* ------------------------------------------------------------------ */
 /* Types                                                              */
@@ -142,7 +142,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
   const [showSessionExpired, setShowSessionExpired] = useState(false);
   const [currentUser, setCurrentUser] = useState<User>(user);
-  const [token, setToken] = useState<string>('');
+  const [, setToken] = useState<string>('');
   const [telegramSettings, setTelegramSettings] = useState<TelegramSettings>({
     telegramNotifications: false,
     priceAlerts: true,
@@ -392,15 +392,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const handleUpgradeClick = () => setShowSubscriptionModal(true);
 
   // Handle notification click from NotificationSystem
-  const handleNotificationClick = (notification: any) => {
-    console.log('Notification clicked:', notification);
-    // You can add custom logic here based on notification type
-    if (notification.type === 'PRICE_ALERT' && notification.data?.symbol) {
-      // Navigate to market section or specific pair
-      setActiveSection('markets');
-      // You could also trigger a specific market view here
-    }
-  };
+  // const handleNotificationClick = (notification: any) => {
+  //   console.log('Notification clicked:', notification);
+  //   if (notification.type === 'PRICE_ALERT' && notification.data?.symbol) {
+  //     setActiveSection('markets');
+  //   }
+  // };
 
   // FIXED: Improved session checking logic
   useEffect(() => {
@@ -740,7 +737,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               )}
 
               {/* NotificationSystem Component - Integrated */}
-              {token && (
+              {/* {token && (
                 <div className="relative">
                   <NotificationSystem
                     token={token}
@@ -751,7 +748,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     maxNotifications={50}
                   />
                 </div>
-              )}
+              )} */}
 
               {/* User Menu */}
               <div className="flex items-center gap-3 pl-3 border-l border-gray-200 relative group">

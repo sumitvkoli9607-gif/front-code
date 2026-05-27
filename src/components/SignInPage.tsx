@@ -1,4 +1,4 @@
-/*  src/pages/SignInPage.tsx  */
+// src/pages/SignInPage.tsx
 import React, { useState, useEffect } from 'react';
 import {
   BarChart3, TrendingUp, Shield, Zap, Users, LogOut,
@@ -56,6 +56,10 @@ export const SignInPage: React.FC<SignInPageProps> = ({ onSignIn }) => {
   const [success, setSuccess] = useState<string | null>(null);
   const [showFeatures, setShowFeatures] = useState(false);
   const [upgradeLoading, setUpgradeLoading] = useState(false);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [acceptedPrivacy, setAcceptedPrivacy] = useState(false);
+  const [showTermsModal, setShowTermsModal] = useState(false);
+  const [showPrivacyModal, setShowPrivacyModal] = useState(false);
 
   /* ---------- AXIOS ---------- */
   const api = axios.create({
@@ -77,6 +81,9 @@ export const SignInPage: React.FC<SignInPageProps> = ({ onSignIn }) => {
         const u: User = JSON.parse(raw);
         setUser(u);
         onSignIn(u, tok);
+        // Auto-accept terms for returning users
+        setAcceptedTerms(true);
+        setAcceptedPrivacy(true);
       } catch {
         localStorage.removeItem('user');
         localStorage.removeItem('token');
@@ -96,6 +103,11 @@ export const SignInPage: React.FC<SignInPageProps> = ({ onSignIn }) => {
 
   /* ---------- GOOGLE ---------- */
   const handleGoogleSuccess = async (credentialResponse: any) => {
+    if (!acceptedTerms || !acceptedPrivacy) {
+      setError('Please accept Terms & Conditions and Privacy Policy to continue.');
+      return;
+    }
+
     setIsLoading(true);
     setError(null);
     setSuccess(null);
@@ -136,34 +148,111 @@ export const SignInPage: React.FC<SignInPageProps> = ({ onSignIn }) => {
     setIsLoading(false);
   };
 
-  /* ---------- DEMO ---------- */
-  const handleDemoLogin = () => {
-    setIsLoading(true);
-    setTimeout(() => {
-      const demo: User = {
-        id: 'demo-' + Date.now(),
-        name: 'Demo User',
-        email: 'demo@tradepro.com',
-        avatar:
-          'https://images.pexels.com/photos/614810/pexels-photo-614810.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=2',
-        availableBalance: 0,
-        totalWithdrawn: 0,
-        pendingWithdrawals: 0,
-        subscription: {
-          plan: 'Free',
-          active: false,
-          startDate: new Date().toISOString(),
-        },
-      };
-      setUser(demo);
-      const tok = 'demo-token-' + Date.now();
-      localStorage.setItem('user', JSON.stringify(demo));
-      localStorage.setItem('token', tok);
-      onSignIn(demo, tok);
-      setSuccess('Demo login successful!');
-      setIsLoading(false);
-    }, 1000);
-  };
+  /* ---------- MODALS ---------- */
+  const TermsModal = () => (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="sticky top-0 bg-white border-b p-4 flex justify-between items-center">
+          <h2 className="text-2xl font-bold text-gray-900">Terms & Conditions</h2>
+          <button
+            onClick={() => setShowTermsModal(false)}
+            className="p-2 hover:bg-gray-100 rounded-full"
+          >
+            <X size={24} />
+          </button>
+        </div>
+        <div className="p-6">
+          <div className="prose prose-sm max-w-none">
+            <p className="text-gray-600 mb-4">
+              By using Trademino Pro, you acknowledge that you have read, understood, and agree to be bound by these Terms and Conditions.
+            </p>
+            
+            <h3 className="font-bold text-gray-900 mt-4 mb-2">Key Points:</h3>
+            <ul className="list-disc pl-5 space-y-2 text-gray-600">
+              <li>Trademino Pro is a cryptocurrency market analysis platform using Binance data</li>
+              <li>All analysis is for informational purposes only</li>
+              <li>Cryptocurrency trading involves substantial risk</li>
+              <li>Past performance does not guarantee future results</li>
+              <li>You are responsible for your own trading decisions</li>
+              <li>We are not liable for financial losses</li>
+            </ul>
+            
+            <div className="mt-6 p-4 bg-blue-50 rounded-lg">
+              <p className="text-sm text-blue-800">
+                <strong>Full Terms:</strong> The complete Terms & Conditions document includes detailed information about service description, user responsibilities, subscription terms, limitation of liability, and more. By accepting, you agree to all terms.
+              </p>
+            </div>
+          </div>
+        </div>
+        <div className="sticky bottom-0 bg-white border-t p-4">
+          <button
+            onClick={() => {
+              setAcceptedTerms(true);
+              setShowTermsModal(false);
+            }}
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-medium"
+          >
+            I Accept Terms & Conditions
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  const PrivacyModal = () => (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="sticky top-0 bg-white border-b p-4 flex justify-between items-center">
+          <h2 className="text-2xl font-bold text-gray-900">Privacy Policy</h2>
+          <button
+            onClick={() => setShowPrivacyModal(false)}
+            className="p-2 hover:bg-gray-100 rounded-full"
+          >
+            <X size={24} />
+          </button>
+        </div>
+        <div className="p-6">
+          <div className="prose prose-sm max-w-none">
+            <p className="text-gray-600 mb-4">
+              We take your privacy seriously. This summary outlines how we handle your data.
+            </p>
+            
+            <h3 className="font-bold text-gray-900 mt-4 mb-2">Data We Collect:</h3>
+            <ul className="list-disc pl-5 space-y-2 text-gray-600">
+              <li><strong>Email & Name:</strong> For account creation via Google OAuth</li>
+              <li><strong>Usage Data:</strong> Analytics to improve our service</li>
+              <li><strong>Market Data:</strong> Public Binance data only</li>
+            </ul>
+            
+            <h3 className="font-bold text-gray-900 mt-4 mb-2">What We Never Do:</h3>
+            <ul className="list-disc pl-5 space-y-2 text-gray-600">
+              <li>Sell your personal data to third parties</li>
+              <li>Access your cryptocurrency wallets or exchange accounts</li>
+              <li>Store sensitive financial information</li>
+              <li>Share your data with advertisers</li>
+            </ul>
+            
+            <div className="mt-6 p-4 bg-green-50 rounded-lg">
+              <p className="text-sm text-green-800">
+                <strong>Full Privacy Policy:</strong> The complete document includes detailed information about data collection, usage, security measures, retention periods, and your rights. By accepting, you agree to our privacy practices.
+              </p>
+            </div>
+          </div>
+        </div>
+        <div className="sticky bottom-0 bg-white border-t p-4">
+          <button
+            onClick={() => {
+              setAcceptedPrivacy(true);
+              setShowPrivacyModal(false);
+            }}
+            className="w-full bg-green-600 hover:bg-green-700 text-white py-3 rounded-lg font-medium"
+          >
+            I Accept Privacy Policy
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 
   /* ---------- PAYPAL UPGRADE ---------- */
   const handleUpgrade = async () => {
@@ -227,6 +316,10 @@ export const SignInPage: React.FC<SignInPageProps> = ({ onSignIn }) => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex">
+      {/* MODALS */}
+      {showTermsModal && <TermsModal />}
+      {showPrivacyModal && <PrivacyModal />}
+
       {/* LEFT - FEATURES */}
       <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-blue-600 via-blue-700 to-purple-700 p-12 flex-col justify-center relative overflow-hidden">
         <div className="absolute inset-0 opacity-10">
@@ -326,10 +419,78 @@ export const SignInPage: React.FC<SignInPageProps> = ({ onSignIn }) => {
                 </div>
               </div>
 
+              {/* TERMS AND PRIVACY CHECKBOXES */}
+              <div className="mb-4 space-y-4">
+                <div className="flex items-start gap-3 p-4 bg-gray-50 rounded-lg border">
+                  <input
+                    type="checkbox"
+                    id="terms"
+                    checked={acceptedTerms}
+                    onChange={(e) => setAcceptedTerms(e.target.checked)}
+                    className="mt-1 h-4 w-4 text-blue-600 rounded focus:ring-blue-500"
+                  />
+                  <div className="flex-1">
+                    <label htmlFor="terms" className="text-sm text-gray-900 font-medium cursor-pointer">
+                      I accept the Terms & Conditions
+                    </label>
+                    <p className="text-xs text-gray-600 mt-1">
+                      By checking this, you agree to our terms of service, including risk disclosures and limitation of liability.
+                    </p>
+                    <button
+                      onClick={() => setShowTermsModal(true)}
+                      className="text-xs text-blue-600 hover:text-blue-800 mt-1 font-medium"
+                    >
+                      View full Terms & Conditions
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-3 p-4 bg-gray-50 rounded-lg border">
+                  <input
+                    type="checkbox"
+                    id="privacy"
+                    checked={acceptedPrivacy}
+                    onChange={(e) => setAcceptedPrivacy(e.target.checked)}
+                    className="mt-1 h-4 w-4 text-green-600 rounded focus:ring-green-500"
+                  />
+                  <div className="flex-1">
+                    <label htmlFor="privacy" className="text-sm text-gray-900 font-medium cursor-pointer">
+                      I accept the Privacy Policy
+                    </label>
+                    <p className="text-xs text-gray-600 mt-1">
+                      Your data is protected with bank-grade security. We never sell your personal information.
+                    </p>
+                    <button
+                      onClick={() => setShowPrivacyModal(true)}
+                      className="text-xs text-green-600 hover:text-green-800 mt-1 font-medium"
+                    >
+                      View full Privacy Policy
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 text-xs text-gray-500">
+                  <Shield size={12} />
+                  <span>Both checkboxes are required to use Trademino Pro</span>
+                </div>
+              </div>
+
               <div className="space-y-4 mb-6">
-                <div className="flex justify-center"><GoogleLogin onSuccess={handleGoogleSuccess} onError={handleGoogleError} useOneTap={false} theme="filled_blue" size="large" text="signin_with" shape="rectangular" /></div>
-                <button onClick={handleDemoLogin} disabled={isLoading} className="w-full flex items-center justify-center gap-2 border-2 border-gray-300 text-gray-700 py-3 px-6 rounded-xl font-medium transition-all hover:border-blue-500 hover:text-blue-600 hover:bg-blue-50 disabled:opacity-50">
-                  {isLoading ? <Loader2 size={20} className="animate-spin" /> : <Zap size={20} />}Try Demo Account
+                <div className="flex justify-center">
+                  <GoogleLogin 
+                    onSuccess={handleGoogleSuccess} 
+                    onError={handleGoogleError} 
+                    useOneTap={false} 
+                    theme="filled_blue" 
+                    size="large" 
+                    text="signin_with" 
+                    shape="rectangular"
+                    disabled={!acceptedTerms || !acceptedPrivacy}
+                  />
+                </div>
+                <button disabled={isLoading} className="w-full flex items-center justify-center gap-2 border-2 border-gray-300 text-gray-700 py-3 px-6 rounded-xl font-medium transition-all hover:border-blue-500 hover:text-blue-600 hover:bg-blue-50 disabled:opacity-50">
+                  {isLoading ? <Loader2 size={20} className="animate-spin" /> : <Zap size={20} />}  
+                  <span className="text-xs font-medium text-gray-800">Calculated By Using Binance Data</span>
                 </button>
               </div>
 
@@ -351,7 +512,9 @@ export const SignInPage: React.FC<SignInPageProps> = ({ onSignIn }) => {
                     <li key={i} className="flex items-start gap-2"><CheckCircle size={16} className="text-green-500 mt-0.5 flex-shrink-0" /><span>{f}</span></li>
                   ))}
                 </ul>
-                <button onClick={() => setShowFeatures(!showFeatures)} className="text-blue-600 text-sm font-medium mt-3 hover:text-blue-700">{showFeatures ? 'Show less' : 'View all features...'}</button>
+                <button onClick={() => setShowFeatures(!showFeatures)} className="text-blue-600 text-sm font-medium mt-3 hover:text-blue-700">
+                  {showFeatures ? 'Show less' : 'View all features...'}
+                </button>
                 {showFeatures && (
                   <div className="mt-4 pt-4 border-t border-gray-200">
                     <h4 className="font-medium text-gray-900 mb-2">Free Tier:</h4>
@@ -360,7 +523,9 @@ export const SignInPage: React.FC<SignInPageProps> = ({ onSignIn }) => {
                         <li key={i} className="flex items-start gap-2"><CheckCircle size={16} className="text-green-500 mt-0.5 flex-shrink-0" /><span>{f}</span></li>
                       ))}
                     </ul>
-                    <h4 className="font-medium text-gray-900 mb-2 flex items-center gap-2"><Lock size={16} className="text-orange-500" />Premium Features:</h4>
+                    <h4 className="font-medium text-gray-900 mb-2 flex items-center gap-2">
+                      <Lock size={16} className="text-orange-500" />Premium Features:
+                    </h4>
                     <ul className="text-sm text-gray-500 space-y-2">
                       {PREMIUM_FEATURES.map((f, i) => (
                         <li key={i} className="flex items-start gap-2"><Lock size={16} className="text-orange-500 mt-0.5 flex-shrink-0" /><span>{f}</span></li>
@@ -397,7 +562,9 @@ export const SignInPage: React.FC<SignInPageProps> = ({ onSignIn }) => {
                     </>
                   )}
                 </div>
-                <p className="text-sm text-gray-600">{user.subscription?.active ? 'Full platform access' : 'Access to 5 cryptocurrencies with basic features'}</p>
+                <p className="text-sm text-gray-600">
+                  {user.subscription?.active ? 'Full platform access' : 'Access to 5 cryptocurrencies with basic features'}
+                </p>
                 {user.subscription?.active && user.subscription.expiryDate && (
                   <p className="text-xs text-gray-500 mt-1">
                     {Math.max(0, Math.ceil((new Date(user.subscription.expiryDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))} days left
@@ -429,6 +596,16 @@ export const SignInPage: React.FC<SignInPageProps> = ({ onSignIn }) => {
                   Upgrade to Enterprise – $49 (30 days)
                 </button>
               )}
+
+              {/* LEGAL LINKS */}
+              <div className="mt-4 flex justify-center gap-4 text-xs">
+                <button onClick={() => setShowTermsModal(true)} className="text-gray-500 hover:text-gray-700">
+                  Terms & Conditions
+                </button>
+                <button onClick={() => setShowPrivacyModal(true)} className="text-gray-500 hover:text-gray-700">
+                  Privacy Policy
+                </button>
+              </div>
 
               {/* LOGOUT */}
               <button onClick={handleLogout} className="mt-4 flex items-center justify-center gap-2 bg-red-500 hover:bg-red-600 text-white py-3 px-6 rounded-xl font-medium transition-all hover:shadow-lg mx-auto">

@@ -1,70 +1,74 @@
-// NotificationSystem.tsx
+// NotificationSystem.tsx - UPDATED VERSION (Only RSI, Breakout, Liquidity)
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  Bell, X, Trash2, AlertCircle,
-  DollarSign, Zap,
-  Shield, MessageSquare, Info,
-  Check, TrendingUp as TrendingUpIcon,
-  TrendingDown as TrendingDownIcon,
-  PieChart,
-  Target,
-  Volume2,
-  AlertTriangle,
+  Bell, X, AlertCircle,
+  Zap,
+  MessageSquare, Info,
+  Check, 
   Activity as ActivityIcon,
   Clock,
   ZapOff,
   User,
   Crown,
   Database,
-  WifiOff
+  WifiOff,
+  Waves,
+  Building,
+  BarChart,
+  Settings,
+  TrendingUp,
 } from 'lucide-react';
 import notificationSound from './notification-sound.mp3';
 
-/* -------------- TYPES (updated with notification usage) -------------- */
+/* -------------- TYPES -------------- */
 interface Notification {
   _id: string;
   title: string;
   message: string;
   type: 'BREAKOUT_ALERT' | 'SUPPORT_BREAKOUT' | 'RESISTANCE_BREAKOUT' | 
          'STRONG_BREAKOUT' | 'MAJOR_BREAKOUT' | 'RSI_OVERBOUGHT' | 
-         'RSI_OVERSOLD' | 'RSI_DIVERGENCE' | 'PRICE_ALERT' | 
-         'SUPPORT_RESISTANCE_BREAK' | 'MAJOR_MOVEMENT' | 'SENTIMENT_SHIFT' |
-         'BUY_SIGNAL' | 'SELL_SIGNAL' | 'RANGE_BUY_SIGNAL' | 
-         'RANGE_SELL_SIGNAL' | 'RANGE_SIGNAL' | 'TRADE_SIGNAL' | 
-         'HOLD_SIGNAL' | 'VOLUME_SURGE' | 'CRITICAL' | 'TEST' |
-         'OVERVIEW_UPDATE' | 'OVERVIEW_ALERT' | 'LIMIT_REACHED' | string;
+         'RSI_OVERSOLD' | 'RSI_DIVERGENCE' |
+         'LIQUIDITY_ZONE_APPROACH' | 'LIQUIDITY_ZONE_BREAK' | 'LIQUIDITY_SWEEP' |
+         'INSTITUTIONAL_LIQUIDITY' | 'HIGH_VOLUME_NODE' | 'LIMIT_REACHED' | 'TEST' | string;
   data?: {
     symbol?: string;
     price?: number;
-    change?: number;
     level?: number;
     breakoutType?: 'SUPPORT_BREAKOUT' | 'RESISTANCE_BREAKOUT';
-    previousSentiment?: string;
-    currentSentiment?: string;
-    overview?: any;
-    previousOverview?: any;
     confidence?: number;
     timestamp?: number;
-    direction?: string;
     strength?: string;
     breakoutPercent?: number;
     volumeMultiplier?: number;
-    volume?: number;
-    rsi?: number;
     rsiValue?: number;
     divergenceType?: 'bearish_divergence' | 'bullish_divergence';
     divergenceStrength?: number;
-    entryZones?: number[];
-    stopLoss?: number;
-    takeProfit?: number;
-    rewardRiskRatio?: number;
-    positionSize?: string;
-    reasons?: string[];
-    signal?: string;
     limitReached?: boolean;
     currentCount?: number;
     limit?: number;
     isFreeUser?: boolean;
+    webNotificationId?: string;
+    
+    // Liquidity zone specific
+    zone?: {
+      price: number;
+      strength: number;
+      type: string;
+      volumeMultiplier?: number;
+      [key: string]: any;
+    };
+    distance?: number;
+    risk?: 'low' | 'medium' | 'high';
+    
+    // Institutional liquidity
+    zones?: Array<any>;
+    
+    // High volume node
+    node?: {
+      price: number;
+      volumeMultiplier: number;
+      [key: string]: any;
+    };
     [key: string]: any;
   };
   priority: 'low' | 'medium' | 'high' | string;
@@ -116,7 +120,7 @@ interface NotificationSystemProps {
 const NotificationSystem: React.FC<NotificationSystemProps> = ({
   token,
   autoRefresh = true,
-  refreshInterval = 30_000,
+  refreshInterval = 30000,
   maxNotifications = 50,
 }) => {
   /* ---- state ---- */
@@ -132,6 +136,8 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
   const [isUsageLoading, setIsUsageLoading] = useState(false);
   const [showUsagePanel, setShowUsagePanel] = useState(false);
   const [isLimitReached, setIsLimitReached] = useState(false);
+  const [notificationSettings, setNotificationSettings] = useState<any>(null);
+  const [showSettingsPanel, setShowSettingsPanel] = useState(false);
 
   /* ---- refs ---- */
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
@@ -166,57 +172,78 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
       if (!res.ok) throw new Error(res.status + '');
       const data: NotificationResponse = await res.json();
       
-      // Ensure data.notifications is an array
       const safeNotifications = Array.isArray(data.notifications) ? data.notifications : [];
       
-      // Get current notification IDs
-      const currentNotificationIds = new Set(safeNotifications.map(n => n?._id).filter(Boolean));
+      // Filter to only show allowed notification types
+      const allowedNotifications = safeNotifications.filter(n => 
+        n?.type && (
+          n.type.includes('BREAKOUT') ||
+          n.type.includes('RSI') ||
+          n.type.includes('LIQUIDITY') ||
+          n.type === 'HIGH_VOLUME_NODE' ||
+          n.type === 'INSTITUTIONAL_LIQUIDITY' ||
+          n.type === 'LIMIT_REACHED' ||
+          n.type === 'TEST'
+        )
+      );
       
-      // Find new notifications (IDs that weren't in previous set)
-      const newNotifications = safeNotifications.filter(
+      const currentNotificationIds = new Set(allowedNotifications.map(n => n?._id).filter(Boolean));
+      
+      // Find new notifications
+      const newNotifications = allowedNotifications.filter(
         n => n?._id && !previousNotificationsRef.current.has(n._id) && !n.read
       );
       
-      // Check for limit reached notifications
-      const hasLimitNotification = safeNotifications.some(
+      // Check for limit reached notification
+      const hasLimitNotification = allowedNotifications.some(
         n => n.type === 'LIMIT_REACHED' && !n.read
       );
       setIsLimitReached(hasLimitNotification);
       
-      // Update the previous notifications set
+      // Update previous notifications ref
       previousNotificationsRef.current = currentNotificationIds;
       
-      // Update notifications - only show first 50 with safe filtering
-      const limitedNotifications = safeNotifications
+      // Limit the number of notifications displayed
+      const limitedNotifications = allowedNotifications
         .filter(Boolean)
         .slice(0, maxNotifications);
       
       setNotifications(limitedNotifications);
       setUnreadCount(data.unreadCount || 0);
       
-      // Update notification stats if available
+      // Update notification stats (only for allowed types)
       if (data.typeStats) {
-        setNotificationStats(data.typeStats.map(stat => ({
+        const filteredStats = data.typeStats.filter(stat => 
+          stat._id?.includes('BREAKOUT') ||
+          stat._id?.includes('RSI') ||
+          stat._id?.includes('LIQUIDITY') ||
+          stat._id === 'HIGH_VOLUME_NODE' ||
+          stat._id === 'INSTITUTIONAL_LIQUIDITY'
+        );
+        
+        setNotificationStats(filteredStats.map(stat => ({
           type: stat._id || 'unknown',
           count: stat.count || 0
         })));
       }
       
-      // Play sound if there are new unread notifications
+      // Play sound for new notifications if dropdown is closed
       if (newNotifications.length > 0) {
         setHasNewNotification(true);
         
-        // Only play sound if dropdown is not open
         if (!isOpen) {
-          notificationSoundRef.current?.play().catch(() => {
-            console.log('Audio play failed, might be due to autoplay restrictions');
-          });
+          try {
+            notificationSoundRef.current?.play().catch(() => {
+              console.log('Audio play failed, might be due to autoplay restrictions');
+            });
+          } catch (e) {
+            console.log('Audio play error:', e);
+          }
         }
       }
       
     } catch (e: any) {
       setError(e.message || 'Failed to fetch notifications');
-      // Reset to empty array on error
       setNotifications([]);
       setUnreadCount(0);
     } finally {
@@ -227,7 +254,6 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
   const fetchNotificationUsage = useCallback(async () => {
     if (!token || !isOpen) return;
     
-    // Throttle usage checks to once per minute
     const now = Date.now();
     if (now - lastLimitCheckRef.current < 60000) return;
     
@@ -244,11 +270,17 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
           }
         }
       );
-      if (!res.ok) throw new Error(res.status + '');
+      if (!res.ok) {
+        if (res.status === 404) {
+          console.log('Notification usage endpoint not found, skipping');
+          return;
+        }
+        throw new Error(res.status + '');
+      }
       const data: NotificationUsage = await res.json();
       setNotificationUsage(data);
       
-      // Check if limit is reached
+      // Check if free user has reached limits
       if (data.subscription.isFreeUser) {
         const webRemaining = data.webNotifications.remaining;
         const telegramRemaining = data.telegramNotifications.remaining;
@@ -259,10 +291,60 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
       }
     } catch (e: any) {
       console.error('Failed to fetch notification usage:', e);
+      // Don't show error to user for this
     } finally {
       setIsUsageLoading(false);
     }
   }, [token, isOpen]);
+
+  const fetchNotificationSettings = useCallback(async () => {
+    if (!token) return;
+    
+    try {
+      const res = await fetch(
+        `${import.meta.env.VITE_API_URL}/api/notification-settings`,
+        { 
+          headers: { 
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setNotificationSettings(data);
+      }
+    } catch (e) {
+      console.error('Failed to fetch notification settings:', e);
+    }
+  }, [token]);
+
+  const updateNotificationSetting = useCallback(async (key: string, value: boolean) => {
+    if (!token || !notificationSettings) return;
+    
+    try {
+      const updates = { [key]: value };
+      const res = await fetch(
+        `${import.meta.env.VITE_API_URL}/api/notification-settings`,
+        { 
+          method: 'PUT',
+          headers: { 
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(updates)
+        }
+      );
+      if (res.ok) {
+        setNotificationSettings((prev: any) => ({
+          ...prev,
+          [key]: value
+        }));
+      }
+    } catch (e) {
+      console.error('Failed to update notification setting:', e);
+    }
+  }, [token, notificationSettings]);
 
   const markAsRead = useCallback(
     async (id: string) => {
@@ -285,12 +367,13 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
         setNotifications(prev => prev.map(n => (n?._id === id ? { ...n, read: true } : n)));
         setUnreadCount(prev => Math.max(0, prev - 1));
         
-        // If this was a limit reached notification, update limit state
         const notification = notifications.find(n => n?._id === id);
         if (notification?.type === 'LIMIT_REACHED') {
           setIsLimitReached(false);
         }
-      } catch {}
+      } catch (e) {
+        console.error('Failed to mark notification as read:', e);
+      }
     },
     [token, notifications]
   );
@@ -310,55 +393,10 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
       setNotifications(prev => prev.map(n => ({ ...n, read: true })));
       setUnreadCount(0);
       setHasNewNotification(false);
-      setIsLimitReached(false); // Clear limit notification when all marked as read
-    } catch {}
-  }, [token]);
-
-  const deleteNotification = useCallback(async (id: string) => {
-    if (!id) return;
-    
-    try {
-      await fetch(
-        `${import.meta.env.VITE_API_URL}/api/notifications/${id}`,
-        { 
-          method: 'DELETE', 
-          headers: { 
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        }
-      );
-      setNotifications(prev => prev.filter(n => n?._id !== id));
-      setUnreadCount(prev => {
-        const deleted = notifications.find(n => n?._id === id);
-        return deleted && !deleted.read ? prev - 1 : prev;
-      });
-      // Remove from previous notifications ref
-      previousNotificationsRef.current.delete(id);
-      
-      // If this was a limit reached notification, update limit state
-      const notification = notifications.find(n => n?._id === id);
-      if (notification?.type === 'LIMIT_REACHED') {
-        setIsLimitReached(false);
-      }
-    } catch {}
-  }, [token, notifications]);
-
-  const clearAll = useCallback(async () => {
-    try {
-      await fetch(`${import.meta.env.VITE_API_URL}/api/notifications`, {
-        method: 'DELETE',
-        headers: { 
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-      });
-      setNotifications([]);
-      setUnreadCount(0);
-      setHasNewNotification(false);
       setIsLimitReached(false);
-      previousNotificationsRef.current.clear();
-    } catch {}
+    } catch (e) {
+      console.error('Failed to mark all as read:', e);
+    }
   }, [token]);
 
   /* ---- auto mark-as-read when card becomes visible ---- */
@@ -383,10 +421,7 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
   useEffect(() => {
     if (!pollingEnabled || !token) return;
     
-    // Initial fetch
     fetchNotifications();
-    
-    // Set up polling interval
     pollingRef.current = setInterval(fetchNotifications, refreshInterval);
     
     return () => {
@@ -397,12 +432,13 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
     };
   }, [pollingEnabled, refreshInterval, fetchNotifications, token]);
 
-  /* ---- initial ---- */
+  /* ---- initial load ---- */
   useEffect(() => {
     if (token) {
       fetchNotifications();
+      fetchNotificationSettings();
     }
-  }, [fetchNotifications, token]);
+  }, [token, fetchNotifications, fetchNotificationSettings]);
 
   /* ---- Reset new notification indicator when dropdown is opened ---- */
   useEffect(() => {
@@ -412,44 +448,24 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
     }
   }, [isOpen, fetchNotificationUsage]);
 
-  /* ---- Refresh usage when notifications change ---- */
-  useEffect(() => {
-    if (isOpen) {
-      fetchNotificationUsage();
-    }
-  }, [notifications, isOpen, fetchNotificationUsage]);
-
   /* ---- UI helpers ---- */
   const iconMap: Record<string, React.ReactNode> = {
-    // Original icons
-    '💰': <DollarSign size={16} className="text-green-500" />,
-    '🔺': <TrendingUpIcon size={16} className="text-red-500" />,
-    '🔻': <TrendingDownIcon size={16} className="text-blue-500" />,
+    '🚨': <AlertCircle size={16} className="text-red-500" />,
     '⚡': <Zap size={16} className="text-yellow-500" />,
-    '🎭': <MessageSquare size={16} className="text-purple-500" />,
+    '📈': <TrendingUp size={16} className="text-green-500" />,
     '📊': <ActivityIcon size={16} className="text-indigo-500" />,
-    '🎯': <Shield size={16} className="text-pink-500" />,
+    '🎭': <MessageSquare size={16} className="text-purple-500" />,
+    '🌊': <Waves size={16} className="text-blue-500" />,
+    '🏦': <Building size={16} className="text-green-600" />,
+    'H': <BarChart size={16} className="text-purple-500" />,
+    '⚠️': <AlertCircle size={16} className="text-yellow-500" />,
     '📨': <Info size={16} className="text-gray-500" />,
     '🧪': <AlertCircle size={16} className="text-orange-500" />,
-    '🔄': <TrendingUpIcon size={16} className="text-teal-500" />,
-    '🟢': <TrendingUpIcon size={16} className="text-green-500" />,
-    '🔴': <TrendingDownIcon size={16} className="text-red-500" />,
-    '🚨': <AlertCircle size={16} className="text-red-500" />,
-    '⚠️': <AlertCircle size={16} className="text-yellow-500" />,
-    '📈': <TrendingUpIcon size={16} className="text-green-500" />,
-    '📉': <TrendingDownIcon size={16} className="text-red-500" />,
-    't': <Target size={16} className="text-blue-500" />,
-    'p': <PieChart size={16} className="text-purple-500" />,
-    'a': <ActivityIcon size={16} className="text-green-500" />,
-    'g': <ActivityIcon size={16} className="text-red-500" />,
-    'y': <AlertTriangle size={16} className="text-yellow-500" />,
-    '🔊': <Volume2 size={16} className="text-orange-500" />,
   };
 
   const getIcon = (n: Notification) => {
     if (!n?.type) return '📨';
     
-    // Map notification types to icons based on backend
     switch (n.type) {
       case 'BREAKOUT_ALERT':
       case 'SUPPORT_BREAKOUT':
@@ -461,26 +477,18 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
       case 'RSI_OVERSOLD':
       case 'RSI_DIVERGENCE':
         return '📊';
-      case 'BUY_SIGNAL':
-      case 'RANGE_BUY_SIGNAL':
-        return '🟢';
-      case 'SELL_SIGNAL':
-      case 'RANGE_SELL_SIGNAL':
-        return '🔴';
-      case 'RANGE_SIGNAL':
-        return '⚡';
-      case 'TRADE_SIGNAL':
-        return '🎯';
-      case 'VOLUME_SURGE':
-        return '🔊';
-      case 'PRICE_ALERT':
-        return n.data?.change && n.data.change > 0 ? '🟢' : '🔴';
-      case 'CRITICAL':
-        return '🚨';
-      case 'TEST':
-        return '🧪';
+      case 'LIQUIDITY_ZONE_APPROACH':
+      case 'LIQUIDITY_ZONE_BREAK':
+      case 'LIQUIDITY_SWEEP':
+        return '🌊';
+      case 'INSTITUTIONAL_LIQUIDITY':
+        return '🏦';
+      case 'HIGH_VOLUME_NODE':
+        return 'H';
       case 'LIMIT_REACHED':
         return '⚠️';
+      case 'TEST':
+        return '🧪';
       default:
         return n.icon || '📨';
     }
@@ -495,10 +503,10 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
 
   const priorityColor = (p: string) => {
     switch (p) {
-      case 'high': return 'bg-red-100 text-red-800 border-red-200';
-      case 'medium': return 'bg-yellow-100 text-yellow-800 border-yellow-200';
-      case 'low': return 'bg-blue-100 text-blue-800 border-blue-200';
-      default: return 'bg-gray-100 text-gray-800 border-gray-200';
+      case 'high': return 'bg-red-100 text-red-800 border-red-200 dark:bg-red-900/20 dark:text-red-300 dark:border-red-800';
+      case 'medium': return 'bg-yellow-100 text-yellow-800 border-yellow-200 dark:bg-yellow-900/20 dark:text-yellow-300 dark:border-yellow-800';
+      case 'low': return 'bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/20 dark:text-blue-300 dark:border-blue-800';
+      default: return 'bg-gray-100 text-gray-800 border-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600';
     }
   };
 
@@ -526,81 +534,39 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
     
     const data = n.data || {};
     
-    // Extract price from different possible locations
     let displayPrice = data.price;
-    if (!displayPrice && data.overview?.currentPrice) {
-      displayPrice = data.overview.currentPrice;
-    }
     
-    // Extract change from different possible locations
-    let displayChange = data.change;
-    if (!displayChange && data.overview?.priceChange24h !== undefined) {
-      displayChange = data.overview.priceChange24h;
-    }
-    if (!displayChange && data.breakoutPercent !== undefined) {
-      displayChange = data.breakoutPercent;
-    }
-    
-    // Extract level for support/resistance notifications
-    let displayLevel = data.level;
-    if (!displayLevel && data.overview?.keyLevels) {
-      if (data.overview.keyLevels.immediateSupport) {
-        displayLevel = data.overview.keyLevels.immediateSupport;
-      } else if (data.overview.keyLevels.immediateResistance) {
-        displayLevel = data.overview.keyLevels.immediateResistance;
-      }
-    }
-    
-    // Extract symbol
     let displaySymbol = data.symbol;
     if (!displaySymbol && n.title) {
-      // Try to extract symbol from title
-      const symbolMatch = n.title.match(/(BTC|ETH|BNB|SOL|XRP|ADA|DOT|MATIC|DOGE|LTC)\//);
+      const symbolMatch = n.title.match(/(BTC|ETH|BNB|SOL|XRP|ADA|DOT|MATIC|DOGE|LTC|SHIB|PEPE|WIF|BONK|SAND|AXS|ENJ|GALA|IMX|RNDR|KAS|VET|ALGO|EGLD|XTZ|ZEN|HNT|QNT|FTM|RUNE|CRV|SNX|COMP|AAVE|MKR|STORJ|ZIL|THETA|HBAR|ONE)\//);
       if (symbolMatch) {
         displaySymbol = symbolMatch[0];
       }
     }
     
-    // Extract confidence
-    let displayConfidence = data.confidence;
-    if (!displayConfidence && data.overview?.tradeSetup?.confidence) {
-      displayConfidence = data.overview.tradeSetup.confidence;
-    }
-    
-    // Extract RSI
-    let displayRsi = data.rsi || data.rsiValue;
-    if (!displayRsi && data.overview?.momentum?.rsi) {
-      displayRsi = data.overview.momentum.rsi;
-    }
-    
     return {
       price: displayPrice,
-      change: displayChange,
-      level: displayLevel,
       symbol: displaySymbol,
-      confidence: displayConfidence,
-      rsi: displayRsi,
+      confidence: data.confidence,
+      rsiValue: data.rsiValue,
       volumeMultiplier: data.volumeMultiplier,
-      direction: data.direction,
       strength: data.strength,
       breakoutType: data.breakoutType,
       breakoutPercent: data.breakoutPercent,
-      previousSentiment: data.previousSentiment,
-      currentSentiment: data.currentSentiment,
       timestamp: data.timestamp,
       divergenceType: data.divergenceType,
       divergenceStrength: data.divergenceStrength,
-      entryZones: data.entryZones,
-      stopLoss: data.stopLoss,
-      takeProfit: data.takeProfit,
-      rewardRiskRatio: data.rewardRiskRatio,
-      positionSize: data.positionSize,
-      reasons: data.reasons,
-      signal: data.signal,
       limitReached: data.limitReached,
       currentCount: data.currentCount,
       limit: data.limit,
       isFreeUser: data.isFreeUser,
+      webNotificationId: data.webNotificationId,
+      // Liquidity data
+      zone: data.zone,
+      distance: data.distance,
+      risk: data.risk,
+      zones: data.zones,
+      node: data.node,
     };
   };
 
@@ -613,17 +579,123 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
     return n?.type?.includes?.('RSI') || false;
   };
 
-  const isTradeSignalNotification = (n: Notification) => {
-    return n?.type?.includes?.('SIGNAL') || 
-           n?.type?.includes?.('TRADE') || 
-           n?.type?.includes?.('RANGE') || 
-           n?.type?.includes?.('BUY') || 
-           n?.type?.includes?.('SELL') || false;
-  };
-
   const isLimitReachedNotification = (n: Notification) => {
     return n?.type === 'LIMIT_REACHED' || false;
   };
+
+  const isLiquidityNotification = (n: Notification) => {
+    return n?.type?.includes?.('LIQUIDITY') || false;
+  };
+
+  const isInstitutionalNotification = (n: Notification) => {
+    return n?.type?.includes?.('INSTITUTIONAL') || false;
+  };
+
+  const isVolumeNodeNotification = (n: Notification) => {
+    return n?.type === 'HIGH_VOLUME_NODE' || false;
+  };
+
+  /* ---- Notification settings panel ---- */
+  const renderSettingsPanel = () => (
+    <div className="mt-4 p-3 bg-gray-50 dark:bg-gray-750 rounded-lg">
+      <div className="flex items-center justify-between mb-3">
+        <h4 className="text-sm font-semibold text-gray-900 dark:text-white flex items-center">
+          <Settings size={14} className="mr-2" />
+          Notification Settings
+        </h4>
+        <button
+          onClick={() => setShowSettingsPanel(false)}
+          className="text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+        >
+          Close
+        </button>
+      </div>
+      
+      {notificationSettings ? (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-700 dark:text-gray-300">Breakout Alerts</span>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={notificationSettings.breakoutAlerts !== false}
+                onChange={e => updateNotificationSetting('breakoutAlerts', e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+            </label>
+          </div>
+          
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-700 dark:text-gray-300">RSI Alerts</span>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={notificationSettings.rsiAlerts !== false}
+                onChange={e => updateNotificationSetting('rsiAlerts', e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+            </label>
+          </div>
+          
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-700 dark:text-gray-300">Liquidity Zone Alerts</span>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={notificationSettings.liquidityZoneAlerts !== false}
+                onChange={e => updateNotificationSetting('liquidityZoneAlerts', e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+            </label>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-700 dark:text-gray-300">Institutional Alerts</span>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={notificationSettings.institutionalLiquidityAlerts !== false}
+                onChange={e => updateNotificationSetting('institutionalLiquidityAlerts', e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+            </label>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-700 dark:text-gray-300">Volume Node Alerts</span>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={notificationSettings.highVolumeNodeAlerts !== false}
+                onChange={e => updateNotificationSetting('highVolumeNodeAlerts', e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+            </label>
+          </div>
+          
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-700 dark:text-gray-300">Telegram Notifications</span>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={notificationSettings.telegramNotifications !== false}
+                onChange={e => updateNotificationSetting('telegramNotifications', e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+            </label>
+          </div>
+        </div>
+      ) : (
+        <p className="text-sm text-gray-500 text-center">Loading settings...</p>
+      )}
+    </div>
+  );
 
   /* ---- render ---- */
   return (
@@ -635,7 +707,6 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
         aria-label="Notifications"
       >
         <Bell size={24} className="text-gray-600 dark:text-gray-300" />
-        {/* Exclamation mark indicator for new notifications */}
         {hasNewNotification && (
           <span className="absolute top-0 right-0 h-5 w-5">
             <span className="absolute inline-flex h-full w-full rounded-full bg-red-600 animate-ping opacity-75"></span>
@@ -644,7 +715,6 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
             </span>
           </span>
         )}
-        {/* Limit reached indicator */}
         {isLimitReached && !hasNewNotification && (
           <span className="absolute top-0 right-0 h-5 w-5">
             <span className="absolute inline-flex items-center justify-center h-5 w-5 rounded-full bg-yellow-500">
@@ -668,11 +738,20 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
               </div>
               <div className="flex items-center space-x-2">
                 <button
+                  onClick={() => setShowSettingsPanel(!showSettingsPanel)}
+                  className={`p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 ${
+                    showSettingsPanel ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500'
+                  }`}
+                  title="Settings"
+                >
+                  <Settings size={18} />
+                </button>
+                <button
                   onClick={() => setShowUsagePanel(!showUsagePanel)}
                   className={`p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 ${
                     showUsagePanel ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500'
                   }`}
-                  title="Show usage"
+                  title="Usage"
                 >
                   <Database size={18} />
                 </button>
@@ -685,14 +764,6 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
                   <Check size={18} />
                 </button>
                 <button
-                  onClick={clearAll}
-                  disabled={!notifications.length}
-                  className={`p-1.5 rounded ${!notifications.length ? 'text-gray-300' : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500'}`}
-                  title="Clear all"
-                >
-                  <Trash2 size={18} />
-                </button>
-                <button
                   onClick={() => setIsOpen(false)}
                   className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700"
                   title="Close"
@@ -702,8 +773,11 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
               </div>
             </div>
 
+            {/* Notification settings panel */}
+            {showSettingsPanel && renderSettingsPanel()}
+
             {/* Notification stats */}
-            {notificationStats.length > 0 && !showUsagePanel && (
+            {!showSettingsPanel && notificationStats.length > 0 && !showUsagePanel && (
               <div className="mt-3 flex flex-wrap gap-1">
                 {notificationStats.slice(0, 5).map((stat, idx) => (
                   <span 
@@ -717,7 +791,7 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
             )}
 
             {/* Notification usage panel */}
-            {showUsagePanel && (
+            {!showSettingsPanel && showUsagePanel && (
               <div className="mt-4 p-3 bg-gray-50 dark:bg-gray-750 rounded-lg">
                 <div className="flex items-center justify-between mb-2">
                   <h4 className="text-sm font-semibold text-gray-900 dark:text-white flex items-center">
@@ -820,21 +894,23 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
             )}
 
             {/* Auto-refresh toggle */}
-            <div className="flex items-center justify-between mt-4">
-              <span className="text-sm text-gray-600 dark:text-gray-400">Auto-refresh</span>
-              <label className="relative inline-flex items-center cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={pollingEnabled}
-                  onChange={e => setPollingEnabled(e.target.checked)}
-                  className="sr-only peer"
-                />
-                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-              </label>
-            </div>
+            {!showSettingsPanel && !showUsagePanel && (
+              <div className="flex items-center justify-between mt-4">
+                <span className="text-sm text-gray-600 dark:text-gray-400">Auto-refresh</span>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={pollingEnabled}
+                    onChange={e => setPollingEnabled(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                </label>
+              </div>
+            )}
           </div>
 
-          {/* List */}
+          {/* Notification list */}
           <div className="flex-1 overflow-y-auto">
             {isLoading ? (
               <div className="p-8 text-center">
@@ -856,12 +932,17 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
             ) : (
               <div>
                 {notifications
-                  .filter(n => n) // Filter out any null/undefined notifications
+                  .filter(n => n)
                   .map(n => {
-                    if (!n?._id) return null; // Skip notifications without ID
+                    if (!n?._id) return null;
                     
                     const displayData = getDisplayData(n);
                     const isLimitNotification = isLimitReachedNotification(n);
+                    const isBreakout = isBreakoutNotification(n);
+                    const isRSI = isRSINotification(n);
+                    const isLiquidity = isLiquidityNotification(n);
+                    const isInstitutional = isInstitutionalNotification(n);
+                    const isVolumeNode = isVolumeNodeNotification(n);
                     
                     return (
                       <div
@@ -897,7 +978,6 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
                               {n.message || 'No message'}
                             </p>
 
-                            {/* Limit reached notification special display */}
                             {isLimitNotification && (
                               <div className="mb-2 p-2 bg-yellow-50 dark:bg-yellow-900/20 rounded border border-yellow-200 dark:border-yellow-800">
                                 <div className="flex items-center text-yellow-700 dark:text-yellow-300">
@@ -910,9 +990,9 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
                               </div>
                             )}
 
-                            {/* Breakout notifications */}
-                            {isBreakoutNotification(n) && (displayData.symbol || displayData.price !== undefined || displayData.breakoutPercent !== undefined) && (
-                              <div className="flex items-center space-x-4 text-xs text-gray-500 mb-2">
+                            {/* Breakout notification data */}
+                            {isBreakout && (
+                              <div className="flex items-center space-x-4 text-xs text-gray-500 mb-2 flex-wrap gap-2">
                                 {displayData.symbol && (
                                   <span className="font-medium bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded">
                                     {displayData.symbol}
@@ -930,126 +1010,129 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
                                   </span>
                                 )}
                                 {displayData.strength && (
-                                  <span className="text-blue-600 dark:text-blue-400 font-medium">
+                                  <span className={`font-medium ${
+                                    displayData.strength === 'major' ? 'text-red-600 dark:text-red-400' :
+                                    displayData.strength === 'strong' ? 'text-yellow-600 dark:text-yellow-400' :
+                                    'text-blue-600 dark:text-blue-400'
+                                  }`}>
                                     {displayData.strength}
+                                  </span>
+                                )}
+                                {displayData.volumeMultiplier !== undefined && (
+                                  <span className="text-orange-600 dark:text-orange-400">
+                                    {displayData.volumeMultiplier.toFixed(1)}x vol
                                   </span>
                                 )}
                               </div>
                             )}
 
-                            {/* RSI notifications */}
-                            {isRSINotification(n) && displayData.rsi !== undefined && (
-                              <div className="flex items-center space-x-4 text-xs text-gray-500 mb-2">
+                            {/* RSI notification data */}
+                            {isRSI && (
+                              <div className="flex items-center space-x-4 text-xs text-gray-500 mb-2 flex-wrap gap-2">
                                 {displayData.symbol && (
                                   <span className="font-medium bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded">
                                     {displayData.symbol}
                                   </span>
                                 )}
-                                <span className="font-medium">
-                                  RSI: {displayData.rsi}
-                                </span>
-                                {displayData.rsi >= 70 && (
-                                  <span className="text-red-600 dark:text-red-400 font-medium">
-                                    ⚠️ Overbought
-                                  </span>
-                                )}
-                                {displayData.rsi <= 30 && (
-                                  <span className="text-green-600 dark:text-green-400 font-medium">
-                                    ⚠️ Oversold
-                                  </span>
+                                {displayData.rsiValue !== undefined && (
+                                  <>
+                                    <span className="font-medium">
+                                      RSI: {displayData.rsiValue}
+                                    </span>
+                                    {displayData.rsiValue >= 70 && (
+                                      <span className="text-red-600 dark:text-red-400 font-medium">
+                                        ⚠️ Overbought
+                                      </span>
+                                    )}
+                                    {displayData.rsiValue <= 30 && (
+                                      <span className="text-green-600 dark:text-green-400 font-medium">
+                                        ⚠️ Oversold
+                                      </span>
+                                    )}
+                                  </>
                                 )}
                                 {displayData.divergenceType && (
                                   <span className="text-purple-600 dark:text-purple-400 font-medium">
-                                    {displayData.divergenceType?.replace('_', ' ') || ''}
+                                    {displayData.divergenceType?.replace('_', ' ') || ''} Divergence
                                   </span>
                                 )}
                               </div>
                             )}
 
-                            {/* Trade signal notifications */}
-                            {isTradeSignalNotification(n) && (
-                              <div className="text-xs text-gray-500 mb-2 space-y-1">
+                            {/* Liquidity notification data */}
+                            {isLiquidity && (
+                              <div className="text-xs text-gray-500 mb-2 flex flex-wrap gap-2">
                                 {displayData.symbol && (
-                                  <div className="flex items-center space-x-2">
-                                    <span className="font-medium bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded">
-                                      {displayData.symbol}
-                                    </span>
-                                    {displayData.signal && (
-                                      <span className={displayData.signal.includes('BUY') ? 'text-green-600 dark:text-green-400 font-medium' : 'text-red-600 dark:text-red-400 font-medium'}>
-                                        {displayData.signal}
-                                      </span>
-                                    )}
-                                  </div>
+                                  <span className="font-medium bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded">
+                                    {displayData.symbol}
+                                  </span>
                                 )}
-                                {displayData.confidence !== undefined && (
-                                  <div className="flex items-center space-x-2">
-                                    <span className="text-blue-600 dark:text-blue-400 font-medium">
-                                      {displayData.confidence}% confidence
-                                    </span>
-                                    {displayData.rewardRiskRatio !== undefined && (
-                                      <span className="text-gray-600 dark:text-gray-400">
-                                        R/R: 1:{displayData.rewardRiskRatio.toFixed(1)}
-                                      </span>
-                                    )}
-                                  </div>
+                                {displayData.zone && (
+                                  <span className="text-blue-600 dark:text-blue-400 font-medium">
+                                    Zone: ${displayData.zone.price.toLocaleString()}
+                                  </span>
                                 )}
-                                {displayData.entryZones && displayData.entryZones.length > 0 && (
-                                  <div className="flex items-center space-x-2">
-                                    <span className="text-gray-600 dark:text-gray-400">
-                                      Entry: ${displayData.entryZones.join('-')}
-                                    </span>
-                                  </div>
+                                {displayData.distance !== undefined && (
+                                  <span>
+                                    Distance: {(displayData.distance * 100).toFixed(2)}%
+                                  </span>
+                                )}
+                                {displayData.risk && (
+                                  <span className={`font-medium ${
+                                    displayData.risk === 'high' ? 'text-red-600 dark:text-red-400' :
+                                    displayData.risk === 'medium' ? 'text-yellow-600 dark:text-yellow-400' :
+                                    'text-green-600 dark:text-green-400'
+                                  }`}>
+                                    Risk: {displayData.risk}
+                                  </span>
                                 )}
                               </div>
                             )}
 
-                            {/* Volume surge */}
-                            {n.type === 'VOLUME_SURGE' && displayData.volumeMultiplier !== undefined && (
-                              <div className="text-xs text-gray-500 mb-2">
-                                Volume: {displayData.volumeMultiplier.toFixed(1)}x average
+                            {/* Institutional liquidity notification data */}
+                            {isInstitutional && (
+                              <div className="text-xs text-gray-500 mb-2 flex flex-wrap gap-2">
+                                {displayData.symbol && (
+                                  <span className="font-medium bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded">
+                                    {displayData.symbol}
+                                  </span>
+                                )}
+                                <span className="text-green-600 dark:text-green-400 font-medium">
+                                  Smart money activity
+                                </span>
+                                {displayData.zones && displayData.zones.length > 0 && (
+                                  <span>
+                                    Zones: {displayData.zones.length}
+                                  </span>
+                                )}
                               </div>
                             )}
 
-                            {/* General price data display */}
-                            {(!isBreakoutNotification(n) && !isRSINotification(n) && !isTradeSignalNotification(n) && n.type !== 'VOLUME_SURGE' && !isLimitNotification) && (
-                              (displayData.symbol || displayData.price !== undefined || displayData.change !== undefined || displayData.confidence !== undefined) && (
-                                <div className="flex items-center space-x-4 text-xs text-gray-500 mb-2">
-                                  {displayData.symbol && (
-                                    <span className="font-medium bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded">
-                                      {displayData.symbol}
+                            {/* High volume node notification data */}
+                            {isVolumeNode && (
+                              <div className="text-xs text-gray-500 mb-2 flex flex-wrap gap-2">
+                                {displayData.symbol && (
+                                  <span className="font-medium bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded">
+                                    {displayData.symbol}
+                                  </span>
+                                )}
+                                {displayData.node && (
+                                  <>
+                                    <span className="text-purple-600 dark:text-purple-400 font-medium">
+                                      Node: ${displayData.node.price.toLocaleString()}
                                     </span>
-                                  )}
-                                  {displayData.price !== undefined && (
-                                    <span className="font-medium">
-                                      ${displayData.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                    </span>
-                                  )}
-                                  {displayData.change !== undefined && (
-                                    <span className={displayData.change >= 0 ? 'text-green-600 dark:text-green-400 font-medium' : 'text-red-600 dark:text-red-400 font-medium'}>
-                                      {displayData.change > 0 ? '+' : ''}
-                                      {displayData.change.toFixed(2)}%
-                                    </span>
-                                  )}
-                                  {displayData.confidence !== undefined && (
-                                    <span className="text-blue-600 dark:text-blue-400 font-medium">
-                                      {displayData.confidence}% confidence
-                                    </span>
-                                  )}
-                                </div>
-                              )
+                                    {displayData.node.volumeMultiplier && (
+                                      <span>
+                                        Volume: {displayData.node.volumeMultiplier.toFixed(1)}x
+                                      </span>
+                                    )}
+                                  </>
+                                )}
+                              </div>
                             )}
 
                             <div className="flex items-center justify-between mt-3">
                               <span className="text-xs text-gray-400">{formatDate(n.createdAt)}</span>
-                              <button
-                                onClick={e => {
-                                  e.stopPropagation();
-                                  n._id && deleteNotification(n._id);
-                                }}
-                                className="text-xs px-2 py-1 rounded text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30"
-                              >
-                                Delete
-                              </button>
                             </div>
                           </div>
                         </div>
@@ -1071,6 +1154,14 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
                 >
                   <Database size={14} className="mr-1" />
                   Usage
+                </button>
+                <button 
+                  onClick={fetchNotificationSettings}
+                  className="text-sm text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200 flex items-center"
+                  title="Settings"
+                >
+                  <Settings size={14} className="mr-1" />
+                  Settings
                 </button>
                 <button onClick={fetchNotifications} className="text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300">
                   Refresh

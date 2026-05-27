@@ -67,6 +67,12 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
     }
   };
 
+  // Get PayPal client ID from environment
+  const paypalClientId = import.meta.env.VITE_PAYPAL_CLIENT_ID;
+
+  // Only render PayPal components if client ID exists
+  const shouldShowPayPal = paypalClientId && !(isActive && currentPlan === 'Enterprise');
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-xl max-w-md w-full max-h-[90vh] flex flex-col">
@@ -122,11 +128,12 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
             <ul className="space-y-3 mb-8 text-gray-700">
               {[
                 'All 25+ cryptocurrencies',
-                'All timeframes (1h – 24h)',
-                'Real-time AI news & sentiment',
+                'All timeframes (5min – 24h)',
+                'Real-time sentiment',
                 'Market psychology metrics',
                 'Full AI-powered analysis',
                 'High-impact news alerts',
+                'Real-time notifications & All',
               ].map((feature) => (
                 <li key={feature} className="flex items-start gap-3">
                   <Check size={18} className="text-green-600 mt-0.5 flex-shrink-0" />
@@ -135,33 +142,44 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
               ))}
             </ul>
 
-            {/* PayPal Button */}
-            <PayPalScriptProvider
-              options={{
-                clientId: import.meta.env.VITE_PAYPAL_CLIENT_ID,
-                currency: 'USD',
-                intent: 'capture',
-              }}
-            >
-              <PayPalButtons
-                style={{
-                  layout: 'vertical',
-                  color: 'gold',
-                  shape: 'rect',
-                  label: 'paypal',
-                  height: 48,
+            {/* PayPal Button - Only show if client ID exists and user doesn't already have Enterprise */}
+            {shouldShowPayPal ? (
+              <PayPalScriptProvider
+                options={{
+                  clientId: paypalClientId,
+                  currency: 'USD',
+                  intent: 'capture',
+                  components: 'buttons',
                 }}
-                disabled={loading || (isActive && currentPlan === 'Enterprise')}
-                createOrder={createOrder}
-                onApprove={onApprove}
-                onCancel={() => setLoading(false)}
-                onError={(err) => {
-                  console.error('PayPal error:', err);
-                  setError('PayPal checkout failed. Please try again.');
-                  setLoading(false);
-                }}
-              />
-            </PayPalScriptProvider>
+              >
+                <PayPalButtons
+                  style={{
+                    layout: 'vertical',
+                    color: 'gold',
+                    shape: 'rect',
+                    label: 'paypal',
+                    height: 48,
+                  }}
+                  disabled={loading}
+                  createOrder={createOrder}
+                  onApprove={onApprove}
+                  onCancel={() => setLoading(false)}
+                  onError={(err) => {
+                    console.error('PayPal error:', err);
+                    setError('PayPal checkout failed. Please try again.');
+                    setLoading(false);
+                  }}
+                />
+              </PayPalScriptProvider>
+            ) : (
+              <div className="text-center py-4">
+                <p className="text-gray-600">
+                  {!paypalClientId
+                    ? 'Payment system is temporarily unavailable. Please try again later.'
+                    : 'You already have an active Enterprise subscription'}
+                </p>
+              </div>
+            )}
 
             {(loading || (isActive && currentPlan === 'Enterprise')) && (
               <div className="mt-4 flex items-center justify-center gap-2 text-gray-600">
@@ -176,7 +194,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
           </div>
 
           <div className="mt-6 text-center text-xs text-gray-500">
-            <p>Secure payment • Instant activation • 30-day money-back guarantee</p>
+            <p>Secure payment • Instant activation</p>
           </div>
         </div>
       </div>
